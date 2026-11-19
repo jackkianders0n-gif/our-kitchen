@@ -270,97 +270,211 @@ const Icon = {
 };
 
 // ======================== SYNC ENGINE ========================
+// Both of you edit the same data from different phones. Each device keeps:
+//   - its local data (what you see),
+//   - a "base" copy: the last version it agreed on with the server,
+//   - the server's version token (updated_at) for that base.
+// When saving, local changes (local vs base) are merged item-by-item with the other
+// person's changes (server vs base), and the write only succeeds if nobody else saved
+// in between; otherwise it re-reads and merges again. So neither person's edits get lost.
 const LS_PREFIX = 'kitchen_';
 const DATA_KEYS = ['recipes','inventory','mealplans','shopping'];
 const DEFAULTS = { recipes:[], inventory:[], mealplans:{}, shopping:[] };
+const COLUMNS = DATA_KEYS.map(k => 'kitchen_'+k);
+
+const isPlainObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isPrim = v => v === null || typeof v !== 'object';
+function deepEq(a, b) {
+  if (a === b) return true;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEq(a[i], b[i])) return false;
+    return true;
+  }
+  if (isPlainObj(a) && isPlainObj(b)) {
+    const ka = Object.keys(a).filter(k => a[k] !== undefined), kb = Object.keys(b).filter(k => b[k] !== undefined);
+    if (ka.length !== kb.length) return false;
+    return ka.every(k => deepEq(a[k], b[k]));
+  }
+  return false;
+}
+const isIdList = a => a.every(x => isPlainObj(x) && x.id != null);
+
+function mergeById(b, l, r) {
+  const bm = new Map(b.map(x => [x.id, x])), rm = new Map(r.map(x => [x.id, x])), lm = new Map(l.map(x => [x.id, x]));
+  const out = [];
+  for (const x of l) {
+    if (rm.has(x.id)) out.push(merge3(bm.get(x.id), x, rm.get(x.id)));
+    else if (bm.has(x.id) && deepEq(bm.get(x.id), x)) continue; // deleted on the other device, untouched here
+    else out.push(x); // added here, or edited here (an edit beats a delete)
+  }
+  for (const y of r) {
+    if (lm.has(y.id)) continue;
+    if (bm.has(y.id) && deepEq(bm.get(y.id), y)) continue; // deleted here, untouched there
+    out.push(y);
+  }
+  return out;
+}
+
+function mergeMultiset(b, l, r) {
+  const count = a => { const m = new Map(); a.forEach(v => m.set(v, (m.get(v)||0)+1)); return m; };
+  const cb = count(b), cl = count(l), cr = count(r);
+  const target = new Map();
+  new Set([...cl.keys(), ...cr.keys()]).forEach(v => target.set(v, Math.max(0, (cl.get(v)||0) + (cr.get(v)||0) - (cb.get(v)||0))));
+  const out = [], used = new Map();
+  for (const v of [...l, ...r]) {
+    const u = used.get(v)||0;
+    if (u < (target.get(v)||0)) { out.push(v); used.set(v, u+1); }
+  }
+  return out;
+}
+
+function merge3(b, l, r) {
+  if (deepEq(l, r)) return l;
+  if (deepEq(b, l)) return r;
+  if (deepEq(b, r)) return l;
+  if (Array.isArray(l) && Array.isArray(r)) {
+    const bb = Array.isArray(b) ? b : [];
+    if (isIdList(l) && isIdList(r) && isIdList(bb)) return mergeById(bb, l, r);
+    if (l.every(isPrim) && r.every(isPrim) && bb.every(isPrim)) return mergeMultiset(bb, l, r);
+    return l;
+  }
+  if (isPlainObj(l) && isPlainObj(r)) {
+    const bb = isPlainObj(b) ? b : {};
+    const out = {};
+    for (const k of new Set([...Object.keys(l), ...Object.keys(r)])) {
+      const inB = bb[k] !== undefined, inL = l[k] !== undefined, inR = r[k] !== undefined;
+      if (inL && inR) out[k] = merge3(bb[k], l[k], r[k]);
+      else if (inL) { if (!(inB && deepEq(bb[k], l[k]))) out[k] = l[k]; }
+      else if (inR) { if (!(inB && deepEq(bb[k], r[k]))) out[k] = r[k]; }
+    }
+    return out;
+  }
+  return l; // same value changed on both devices: this device wins
+}
+
+const pickData = d => { const o = {}; DATA_KEYS.forEach(k => o[k] = d?.[k] ?? DEFAULTS[k]); return o; };
+function mergeData(base, local, remote) {
+  const o = {};
+  DATA_KEYS.forEach(k => o[k] = merge3(base ? base[k] : undefined, local[k], remote[k]));
+  return o;
+}
+const rowToData = row => { const o = {}; DATA_KEYS.forEach(k => o[k] = row['kitchen_'+k] ?? DEFAULTS[k]); return o; };
+
+function lsGet(k) { try { return localStorage.getItem(LS_PREFIX+k); } catch(e) { return null; } }
+function lsSet(k, v) { try { if (v == null) localStorage.removeItem(LS_PREFIX+k); else localStorage.setItem(LS_PREFIX+k, v); } catch(e) {} }
 
 function loadLocal() {
   const d = {};
-  try {
-    DATA_KEYS.forEach(k => { const v=localStorage.getItem(LS_PREFIX+k); d[k]=v?JSON.parse(v):DEFAULTS[k]; });
-    d.updatedAt = localStorage.getItem(LS_PREFIX+'updated_at') || null;
-  } catch(e) { Object.assign(d, DEFAULTS); d.updatedAt=null; }
+  try { DATA_KEYS.forEach(k => { const v = lsGet(k); d[k] = v ? JSON.parse(v) : DEFAULTS[k]; }); }
+  catch(e) { Object.assign(d, DEFAULTS); }
   return d;
 }
-
-function saveLocal(data) {
-  try {
-    DATA_KEYS.forEach(k => localStorage.setItem(LS_PREFIX+k, JSON.stringify(data[k])));
-    const now = new Date().toISOString();
-    localStorage.setItem(LS_PREFIX+'updated_at', now);
-    localStorage.setItem(LS_PREFIX+'dirty', 'true');
-    return now;
-  } catch(e) { return data.updatedAt; }
-}
+function saveLocal(d) { DATA_KEYS.forEach(k => lsSet(k, JSON.stringify(d[k]))); }
+function loadBase() { try { const v = lsGet('base'); return v ? JSON.parse(v) : null; } catch(e) { return null; } }
 
 function useKitchenData(userId) {
   const [data, setData] = useState(loadLocal);
   const [sync, setSync] = useState('offline');
-  const dirtyRef = useRef(false);
-  const timerRef = useRef(null);
   const dataRef = useRef(data);
-  dataRef.current = data;
+  const dirtyRef = useRef(lsGet('dirty') === 'true');
+  const baseRef = useRef(loadBase());
+  const versionRef = useRef(lsGet('version'));
+  const busyRef = useRef(false), againRef = useRef(false), timerRef = useRef(null);
 
-  async function push() {
-    if(!userId) return;
-    setSync('syncing');
-    try {
-      const d = dataRef.current;
-      const { error } = await sb.from('user_data').upsert({
-        user_id: userId,
-        kitchen_recipes: d.recipes,
-        kitchen_inventory: d.inventory,
-        kitchen_mealplans: d.mealplans,
-        kitchen_shopping: d.shopping,
-        updated_at: d.updatedAt
-      }, { onConflict: 'user_id' });
-      if(!error) { try{localStorage.removeItem(LS_PREFIX+'dirty')}catch(e){} dirtyRef.current=false; setSync('synced'); }
-      else setSync('offline');
-    } catch(e) { setSync('offline'); }
+  function setLocal(nd, dirty) {
+    dataRef.current = nd; setData(nd); saveLocal(nd);
+    dirtyRef.current = dirty; lsSet('dirty', dirty ? 'true' : null);
+  }
+  function setBase(base, version) {
+    baseRef.current = base; versionRef.current = version;
+    lsSet('base', JSON.stringify(base)); lsSet('version', version);
   }
 
-  function schedulePush() { clearTimeout(timerRef.current); timerRef.current = setTimeout(push, 1500); }
-
-  async function pull() {
-    if(!userId) return;
-    setSync('syncing');
-    try {
-      const { data:row, error } = await sb.from('user_data')
-        .select('kitchen_recipes,kitchen_inventory,kitchen_mealplans,kitchen_shopping,updated_at')
-        .eq('user_id', userId).maybeSingle();
-      if(error) { setSync('offline'); return; }
-      if(!row) { if(dirtyRef.current) push(); else setSync('synced'); return; }
-      const localTime = dataRef.current.updatedAt ? new Date(dataRef.current.updatedAt).getTime() : 0;
-      const remoteTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-      if(remoteTime > localTime && !dirtyRef.current) {
-        const nd = { recipes:row.kitchen_recipes||[], inventory:row.kitchen_inventory||[], mealplans:row.kitchen_mealplans||{}, shopping:row.kitchen_shopping||[], updatedAt:row.updated_at };
-        setData(nd); dataRef.current = nd;
-        try { DATA_KEYS.forEach(k => localStorage.setItem(LS_PREFIX+k, JSON.stringify(nd[k]))); localStorage.setItem(LS_PREFIX+'updated_at', nd.updatedAt); } catch(e){}
-        setSync('synced');
-      } else if(dirtyRef.current) { push(); }
-      else { setSync('synced'); }
-    } catch(e) { setSync('offline'); }
+  async function fetchRemote() {
+    const { data:row, error } = await sb.from('user_data').select(COLUMNS.join(',')+',updated_at').eq('user_id', userId).maybeSingle();
+    if (error) throw error;
+    return row ? { data: rowToData(row), version: row.updated_at } : null;
   }
+
+  async function syncOnce() {
+    let remote = await fetchRemote();
+    if (!dirtyRef.current) {
+      if (remote && remote.version !== versionRef.current) {
+        setBase(remote.data, remote.version);
+        setLocal(remote.data, false);
+      }
+      return;
+    }
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const snapshot = dataRef.current;
+      const local = pickData(snapshot);
+      const merged = remote ? mergeData(baseRef.current, local, remote.data) : local;
+      const payload = { updated_at: new Date().toISOString() };
+      DATA_KEYS.forEach(k => payload['kitchen_'+k] = merged[k]);
+      let res;
+      if (!remote) {
+        res = await sb.from('user_data').insert({ user_id: userId, ...payload }).select('updated_at');
+      } else {
+        let q = sb.from('user_data').update(payload).eq('user_id', userId);
+        q = remote.version == null ? q.is('updated_at', null) : q.eq('updated_at', remote.version);
+        res = await q.select('updated_at');
+      }
+      const ok = !res.error && res.data && res.data.length > 0;
+      if (res.error && res.error.code !== '23505') throw res.error;
+      if (!ok) { remote = await fetchRemote(); continue; } // someone else saved first: merge again
+      setBase(merged, res.data[0].updated_at);
+      const current = dataRef.current;
+      if (current === snapshot) setLocal(merged, false);
+      else setLocal(mergeData(local, pickData(current), merged), true); // edits made while saving
+      return;
+    }
+    throw new Error('Too many conflicting saves');
+  }
+
+  async function syncNow() {
+    if (!userId) return;
+    if (busyRef.current) { againRef.current = true; return; }
+    busyRef.current = true; setSync('syncing');
+    try {
+      do { againRef.current = false; await syncOnce(); } while (againRef.current || dirtyRef.current);
+      setSync('synced');
+    } catch(e) { setSync('offline'); }
+    finally { busyRef.current = false; }
+  }
+
+  function schedulePush() { clearTimeout(timerRef.current); timerRef.current = setTimeout(syncNow, 800); }
 
   function update(key, updater) {
-    setData(prev => {
-      const val = typeof updater==='function' ? updater(prev[key]) : updater;
-      const nd = {...prev, [key]:val};
-      nd.updatedAt = saveLocal(nd);
-      dirtyRef.current = true;
-      dataRef.current = nd;
-      schedulePush();
-      return nd;
-    });
+    const prev = dataRef.current;
+    const val = typeof updater === 'function' ? updater(prev[key]) : updater;
+    const nd = { ...prev, [key]: val };
+    setLocal(nd, true);
+    schedulePush();
   }
 
   useEffect(() => {
-    try { dirtyRef.current = localStorage.getItem(LS_PREFIX+'dirty')==='true'; } catch(e){}
-    pull();
-    const onOnline = () => { if(dirtyRef.current) push(); };
+    syncNow();
+    const onOnline = () => syncNow();
+    const onVis = () => { if (document.visibilityState === 'visible') syncNow(); else if (dirtyRef.current) { clearTimeout(timerRef.current); syncNow(); } };
     window.addEventListener('online', onOnline);
-    const interval = setInterval(pull, 30000);
-    return () => { window.removeEventListener('online', onOnline); clearInterval(interval); clearTimeout(timerRef.current); };
+    document.addEventListener('visibilitychange', onVis);
+    // Live updates when the other person saves (needs Realtime enabled for user_data in Supabase);
+    // the poll below is the fallback.
+    let channel = null;
+    try {
+      channel = sb.channel('kitchen-'+userId)
+        .on('postgres_changes', { event:'*', schema:'public', table:'user_data', filter:`user_id=eq.${userId}` },
+          payload => { if (payload?.new?.updated_at !== versionRef.current) syncNow(); })
+        .subscribe();
+    } catch(e) {}
+    const interval = setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 15000);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVis);
+      clearInterval(interval); clearTimeout(timerRef.current);
+      try { if (channel) sb.removeChannel(channel); } catch(e) {}
+    };
   }, [userId]);
 
   return { data, update, sync };
