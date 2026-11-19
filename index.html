@@ -68,7 +68,7 @@ const {useState,useEffect,useCallback,useMemo,useRef,createContext,useContext} =
 // ======================== CONFIG ========================
 const SUPABASE_URL = 'https://wvedhcuebfdfkhfvphlb.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_bkeGnvruQEz3MsVDZiJ03g_bhXXDjgC';
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: 'kitchen-auth' }
 });
@@ -81,6 +81,8 @@ const CATEGORIES = ['Fruit & Veg','Meat & Fish','Dairy','Bakery','Frozen','Drink
 const CAT_EMOJI = {'Fruit & Veg':'🥬','Meat & Fish':'🥩','Dairy':'🧀','Bakery':'🍞','Frozen':'🧊','Drinks':'☕','Cupboard':'🫙','Household':'🧹','Other':'📦'};
 const CAT_COLORS = {'Fruit & Veg':'#6B9B6E','Meat & Fish':'#D4715E','Dairy':'#7BAFD4','Bakery':'#D4A96B','Frozen':'#7BC4D4','Drinks':'#9B7BD4','Cupboard':'#D49B6B','Household':'#D47BA4','Other':'#A0958B'};
 const SPECIAL_MEALS = { OUT: '🍽️ Out for dinner', SKIP: null };
+// A plan cell holds a recipe id, '__OUT__', or {note:'…'} for a meal with no recipe
+const cellNote = v => (v && typeof v === 'object' && v.note) ? v.note : null;
 
 const CATEGORY_KEYWORDS = {
   'Fruit & Veg': ['apple','banana','orange','lemon','lime','grape','strawberr','blueberr','raspberr','mango','pear','peach','melon','avocado','tomato','potato','onion','garlic','carrot','broccoli','spinach','lettuce','cucumber','pepper','courgette','aubergine','mushroom','celery','leek','cabbage','kale','sweetcorn','corn on','pea','bean','lentil','salad','herb','basil','coriander','parsley','mint','ginger','chilli','fruit','veg','vegetable','spring onion','sweet potato','butternut','beetroot','radish','asparagus','tenderstem','rocket','watercress','pak choi'],
@@ -500,10 +502,20 @@ function PlanTab({data, update, isDesktop}) {
     if(val) newCells[key] = val; else delete newCells[key];
     const newPlans = {...mealplans, [weekKey]: {...(mealplans[weekKey]||{}), cells:newCells, updatedAt:new Date().toISOString()}};
     update('mealplans', newPlans);
-    if(val && val !== '__OUT__') {
+    if(typeof val === 'string' && val !== '__OUT__') {
       update('recipes', rs => rs.map(r => r.id===val ? {...r, lastPlanned:weekKey} : r));
     }
     setPicker(null); setSearch('');
+  }
+
+  function openPicker(day, meal) {
+    setPicker({day, meal});
+    setSearch(cellNote(cells[`${day}-${meal}`]) || '');
+  }
+
+  function addNote() {
+    const text = search.trim();
+    if (text) assign({note: text});
   }
 
   function openMealPrep() {
@@ -616,6 +628,7 @@ function PlanTab({data, update, isDesktop}) {
   // Shared recipe picker overlay content (used in both mobile and desktop)
   function RecipePickerContent() {
     const isLunch = picker?.meal === 'Lunch';
+    const exactMatch = filtered.some(r => r.name?.trim().toLowerCase() === search.trim().toLowerCase());
     return (<div>
       {cells[`${picker.day}-${picker.meal}`] && <Btn danger sm onClick={()=>assign(null)} style={{marginBottom:14}}>Clear</Btn>}
       <Btn secondary sm onClick={()=>assign('__OUT__')} style={{marginBottom:14,marginLeft:cells[`${picker.day}-${picker.meal}`]?8:0}}>🍽️ Out for dinner</Btn>
@@ -638,9 +651,19 @@ function PlanTab({data, update, isDesktop}) {
 
       <div style={{position:'relative',marginBottom:14}}>
         <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
-        <input style={{paddingLeft:36}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
+        <input style={{paddingLeft:36}} placeholder="Search recipes or type any meal…" value={search} onChange={e=>setSearch(e.target.value)}
+          onKeyDown={e=>{ if(e.key==='Enter' && search.trim() && !exactMatch) { e.preventDefault(); addNote(); } }} />
       </div>
-      {filtered.length===0 ? <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes found. Add some in the Recipes tab.</p>
+      {search.trim() && !exactMatch && (
+        <div style={{...S.itemRow,cursor:'pointer'}} onClick={addNote}>
+          <span style={{width:8,display:'flex',justifyContent:'center',color:'var(--accent)',fontWeight:700}}>+</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={S.itemName}>Add “{search.trim()}”</div>
+            <div style={S.itemMeta}>Without a recipe</div>
+          </div>
+        </div>
+      )}
+      {filtered.length===0 ? (!search.trim() && <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes yet. Type a meal above, or add recipes in the Recipes tab.</p>)
       : filtered.map(r => (
         <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(r.id)}>
           <CatDot cat={r.category} />
@@ -734,12 +757,14 @@ function PlanTab({data, update, isDesktop}) {
                 const key = `${day}-${meal}`;
                 const val = cells[key];
                 const isOut = val === '__OUT__';
-                const recipe = !isOut && val ? recipeMap[val] : null;
+                const note = cellNote(val);
+                const recipe = !isOut && !note && val ? recipeMap[val] : null;
                 return (
-                  <div key={key} style={{...S.planTableCell}} onClick={()=>setPicker({day,meal})}
+                  <div key={key} style={{...S.planTableCell}} onClick={()=>openPicker(day,meal)}
                     onMouseEnter={e=>e.currentTarget.style.background='var(--accent-bg)'}
                     onMouseLeave={e=>e.currentTarget.style.background='var(--surface)'}>
                     {isOut ? <span style={{fontSize:'.82rem'}}>🍽️ Out</span>
+                      : note ? <span style={{fontSize:'.82rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'100%',display:'block'}}>{note}</span>
                       : recipe ? <span style={{fontSize:'.82rem',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'100%',display:'block'}}>{recipe.name}</span>
                       : <span style={{color:'var(--text-muted)',fontSize:'.75rem'}}>+</span>}
                   </div>
@@ -749,13 +774,13 @@ function PlanTab({data, update, isDesktop}) {
           ))}
         </div>
 
-        <MealPrepSection />
+        {MealPrepSection()}
 
         <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
-          {picker && <RecipePickerContent />}
+          {picker && RecipePickerContent()}
         </Overlay>
         <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
-          <MealPrepOverlayContent />
+          {MealPrepOverlayContent()}
         </Overlay>
       </div>
     );
@@ -779,11 +804,13 @@ function PlanTab({data, update, isDesktop}) {
               const key = `${day}-${meal}`;
               const val = cells[key];
               const isOut = val === '__OUT__';
-              const recipe = !isOut && val ? recipeMap[val] : null;
+              const note = cellNote(val);
+              const recipe = !isOut && !note && val ? recipeMap[val] : null;
               return (
-                <div key={meal} style={S.mealCell} onClick={()=>setPicker({day,meal})}>
+                <div key={meal} style={S.mealCell} onClick={()=>openPicker(day,meal)}>
                   <div style={{fontSize:'.68rem',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text-muted)',marginBottom:3}}>{meal}</div>
                   {isOut ? <div style={{fontSize:'.85rem',fontWeight:500}}>🍽️ Out</div>
+                    : note ? <div style={{fontSize:'.85rem',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{note}</div>
                     : recipe ? <div style={{fontSize:'.85rem',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{recipe.name}</div>
                     : <div style={{color:'var(--text-muted)',fontStyle:'italic',fontSize:'.8rem'}}>+ Add</div>}
                 </div>
@@ -793,13 +820,13 @@ function PlanTab({data, update, isDesktop}) {
         </div>
       ))}
 
-      <MealPrepSection />
+      {MealPrepSection()}
 
       <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
-        {picker && <RecipePickerContent />}
+        {picker && RecipePickerContent()}
       </Overlay>
       <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
-        <MealPrepOverlayContent />
+        {MealPrepOverlayContent()}
       </Overlay>
     </div>
   );
