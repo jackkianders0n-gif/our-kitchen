@@ -631,10 +631,144 @@ function weightedPick(list) {
   return list[list.length - 1];
 }
 
+// ======================== SHOPPING FROM PLAN ========================
+const UNITS = { g:'g', gram:'g', grams:'g', gr:'g', kg:['g',1000], kilo:['g',1000], kilos:['g',1000], ml:'ml', l:['ml',1000], litre:['ml',1000], litres:['ml',1000], liter:['ml',1000], liters:['ml',1000],
+  tsp:'tsp', teaspoon:'tsp', teaspoons:'tsp', tbsp:'tbsp', tbs:'tbsp', tablespoon:'tbsp', tablespoons:'tbsp' };
+const PLURAL_UNITS = { tin:'tins', can:'cans', cup:'cups', clove:'cloves', pack:'packs', packet:'packets', bunch:'bunches', handful:'handfuls', slice:'slices', jar:'jars', bag:'bags', pinch:'pinches', sprig:'sprigs', stick:'sticks', head:'heads', fillet:'fillets', rasher:'rashers' };
+const FRACTIONS = { '½':.5, '¼':.25, '¾':.75, '⅓':1/3, '⅔':2/3 };
+const STAPLES = new Set(['salt','pepper','black pepper','salt and pepper','water','olive oil','vegetable oil','sunflower oil','oil','cooking oil']);
+
+function singular(w) {
+  if (/ies$/.test(w)) return w.slice(0,-3) + 'y';
+  if (/oes$/.test(w)) return w.slice(0,-2);
+  if (/(ch|sh|x|ss)es$/.test(w)) return w.slice(0,-2);
+  if (/s$/.test(w) && !/ss$/.test(w)) return w.slice(0,-1);
+  return w;
+}
+// "Onions, finely chopped" and "onion" are the same thing to buy
+function ingKey(name) {
+  const base = (name || '').toLowerCase().split(',')[0].replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim();
+  const words = base.split(' '); words[words.length-1] = singular(words[words.length-1]);
+  return words.join(' ');
+}
+function parseQty(q) {
+  const s = (q || '').trim().toLowerCase();
+  const m = s.match(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d*\.?\d+\s*[½¼¾⅓⅔]?|[½¼¾⅓⅔])\s*([a-z]+)?\.?$/);
+  if (!m) return null;
+  let n, v = m[1].trim();
+  if (/^\d+\s+\d+\/\d+$/.test(v)) { const [w, f] = v.split(/\s+/); const [a, b] = f.split('/'); n = +w + a/b; }
+  else if (/^\d+\/\d+$/.test(v)) { const [a, b] = v.split('/'); n = a/b; }
+  else { const fr = v.slice(-1); n = FRACTIONS[fr] != null ? (parseFloat(v.slice(0,-1)) || 0) + FRACTIONS[fr] : parseFloat(v); }
+  if (!isFinite(n)) return null;
+  let unit = m[2] || '';
+  const u = UNITS[unit];
+  if (Array.isArray(u)) { unit = u[0]; n *= u[1]; } else if (u) unit = u;
+  else if (unit) { const sing = Object.keys(PLURAL_UNITS).find(k => PLURAL_UNITS[k] === unit); unit = sing || unit; }
+  return { n, unit };
+}
+function fmtQty(n, unit) {
+  const num = x => String(Math.round(x * 100) / 100);
+  if (unit === 'g') return n >= 1000 ? num(n/1000) + 'kg' : num(n) + 'g';
+  if (unit === 'ml') return n >= 1000 ? num(n/1000) + 'l' : num(n) + 'ml';
+  if (!unit) return num(n);
+  return num(n) + ' ' + (n > 1 && PLURAL_UNITS[unit] ? PLURAL_UNITS[unit] : unit);
+}
+// Add up quantities that share a unit: ["300g","200g","1 tin"] -> "500g + 1 tin"
+function combineQty(qtys) {
+  const sums = {}, order = [], raw = [];
+  qtys.filter(q => q && q.trim()).forEach(q => {
+    const p = parseQty(q);
+    if (!p) { if (!raw.includes(q.trim())) raw.push(q.trim()); return; }
+    if (!(p.unit in sums)) { sums[p.unit] = 0; order.push(p.unit); }
+    sums[p.unit] += p.n;
+  });
+  return [...order.map(u => fmtQty(sums[u], u)), ...raw].join(' + ');
+}
+// Meals in a week that need shopping for. Meal prep counts once, however many lunches it covers.
+function weekMeals(plan, recipeMap) {
+  const cells = plan?.cells || {}, mp = plan?.mealPrep, out = [];
+  let prepAdded = false;
+  DAYS.forEach((day, di) => MEALS.forEach(meal => {
+    const id = cellRecipeId(cells[`${day}-${meal}`]); if (!id || !recipeMap[id]) return;
+    if (mp && meal === 'Lunch' && id === mp.recipeId && (mp.days || []).includes(day)) {
+      if (!prepAdded) { prepAdded = true; out.push({ key: 'mealprep', recipe: recipeMap[id], label: 'Meal prep', di: Math.min(...mp.days.map(d => DAYS.indexOf(d))) }); }
+      return;
+    }
+    out.push({ key: `${day}-${meal}`, recipe: recipeMap[id], label: `${day} ${meal.toLowerCase()}`, di });
+  }));
+  return out;
+}
+function combineIngredients(meals) {
+  const map = new Map();
+  meals.forEach(m => (m.recipe.ingredients || []).forEach(ing => {
+    if (!ing.name || !ing.name.trim()) return;
+    const k = ingKey(ing.name);
+    if (!map.has(k)) map.set(k, { key: k, name: ing.name.split(',')[0].replace(/\(.*?\)/g,'').trim(), qtys: [], from: [] });
+    const e = map.get(k); e.qtys.push(ing.qty); if (!e.from.includes(m.recipe.name)) e.from.push(m.recipe.name);
+  }));
+  return [...map.values()].map(e => ({ ...e, qty: combineQty(e.qtys) }));
+}
+
+function ShopFromPlan({ plan, recipeMap, inventory, shopping, todayIdx, onAdd, onClose }) {
+  const meals = useMemo(() => weekMeals(plan, recipeMap), [plan, recipeMap]);
+  const [mealOn, setMealOn] = useState(() => { const o = {}; meals.forEach(m => o[m.key] = m.di >= todayIdx); return o; });
+  const [over, setOver] = useState({});
+  const items = useMemo(() => combineIngredients(meals.filter(m => mealOn[m.key])), [meals, mealOn]);
+  const onList = useMemo(() => new Set(shopping.filter(i => !i.checked).map(i => ingKey(i.name))), [shopping]);
+  const pantry = useMemo(() => { const m = new Map(); inventory.forEach(i => m.set(ingKey(i.name), i)); return m; }, [inventory]);
+  function reason(it) {
+    if (onList.has(it.key)) return 'Already on your list';
+    const inv = pantry.get(it.key);
+    if (inv?.purchases?.length) {
+      const last = [...inv.purchases].sort().pop(), ago = daysAgo(last), r = calcRestock(inv.purchases);
+      if (r ? !r.isOverdue : ago <= 7) return `Bought ${relDate(last).toLowerCase()}`;
+    }
+    if (STAPLES.has(it.key)) return 'Cupboard staple';
+    return null;
+  }
+  const rows = items.map(it => { const why = reason(it); return { ...it, why, on: over[it.key] ?? !why }; });
+  const chosen = rows.filter(r => r.on);
+  const sectionHead = { fontSize:'.72rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'var(--text-muted)', margin:'4px 0 6px' };
+  if (!meals.length) return <p style={{color:'var(--text-muted)'}}>No recipes planned this week yet.</p>;
+  return (<div>
+    <div style={sectionHead}>Meals</div>
+    {meals.map(m => (
+      <div key={m.key} style={{...S.checkRow,cursor:'pointer'}} onClick={() => setMealOn(o => ({...o, [m.key]: !o[m.key]}))}>
+        <span style={{...S.checkbox, ...(mealOn[m.key] && S.checkboxOn)}}>{mealOn[m.key] && Icon.check}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={S.itemName}>{m.recipe.name}</div>
+          <div style={S.itemMeta}>{m.label}{!(m.recipe.ingredients||[]).length && ' · no ingredients listed'}</div>
+        </div>
+      </div>
+    ))}
+    <div style={{...sectionHead, marginTop:18}}>Ingredients</div>
+    {rows.length === 0 && <p style={{color:'var(--text-muted)',fontSize:'.85rem'}}>Nothing to buy for the selected meals.</p>}
+    {rows.map(r => (
+      <div key={r.key} style={{...S.checkRow,cursor:'pointer'}} onClick={() => setOver(o => ({...o, [r.key]: !r.on}))}>
+        <span style={{...S.checkbox, ...(r.on && S.checkboxOn)}}>{r.on && Icon.check}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{...S.itemName, ...(!r.on && {color:'var(--text-muted)'})}}>{r.name}</div>
+          <div style={S.itemMeta}>{r.why ? <span style={{color:'var(--warning)'}}>{r.why} · </span> : null}{r.from.join(', ')}</div>
+        </div>
+        <span style={{color:'var(--text-muted)',fontSize:'.82rem',fontVariantNumeric:'tabular-nums',flexShrink:0,maxWidth:'40%',textAlign:'right'}}>{r.qty}</span>
+      </div>
+    ))}
+    <div style={{position:'sticky',bottom:-20,background:'var(--surface)',padding:'14px 0 4px',marginTop:8}}>
+      <Btn primary style={{width:'100%'}} disabled={!chosen.length} onClick={() => onAdd(chosen.map(r => ({
+        id: genId(), name: r.name, qty: r.qty, category: pantry.get(r.key)?.category || guessCategory(r.name),
+        checked: false, fromRecipe: r.from.join(', '), addedAt: new Date().toISOString() })))}>
+        Add {chosen.length} item{chosen.length !== 1 ? 's' : ''} to list
+      </Btn>
+    </div>
+  </div>);
+}
+
 // ======================== PLAN TAB ========================
 function PlanTab({data, update, isDesktop, cook}) {
   const {recipes, mealplans} = data;
   const [weekOffset, setWeekOffset] = useState(0);
+  const [showShop, setShowShop] = useState(false);
+  const [flash, setFlash] = useState(null);
   const [picker, setPicker] = useState(null);
   const [search, setSearch] = useState('');
   const [mealPrepOverlay, setMealPrepOverlay] = useState(null); // null | 'pick' | 'days'
@@ -789,12 +923,22 @@ function PlanTab({data, update, isDesktop, cook}) {
     return null;
   }
 
+  useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), 4000); return () => clearTimeout(t); }, [flash]);
+  function addShopping(items) {
+    update('shopping', list => [...list, ...items]);
+    setShowShop(false);
+    setFlash(`Added ${items.length} item${items.length!==1?'s':''} to your shopping list`);
+  }
+
   function PlanActions() {
     if (weekOffset < 0) return null;
     const showFill = emptyDinners.length > 0 && recipes.length > 1, showUndo = undo && undo.weekKey === weekKey;
-    if (!showFill && !showUndo) return null;
+    const showList = Object.values(cells).some(v => cellRecipeId(v) && recipeMap[v]);
+    if (!showFill && !showUndo && !showList && !flash) return null;
     return (<div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:16}}>
       {showFill && <Btn secondary sm onClick={fillDinners}>✨ Fill {emptyDinners.length} empty dinner{emptyDinners.length>1?'s':''}</Btn>}
+      {showList && <Btn secondary sm onClick={()=>setShowShop(true)}>🛒 Shopping list for this week</Btn>}
+      {flash && <div style={{...S.badge,background:'var(--success-bg)',color:'var(--success)',padding:'6px 10px'}}>✓ {flash}</div>}
       {showUndo && <div style={{...S.badge,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text)',padding:'4px 4px 4px 10px',gap:8,fontWeight:500}}>
         Filled {Object.keys(undo.filled).length} — tap any to change
         <button style={{...chipBtn,fontSize:'.78rem'}} onClick={undoFill}>Undo</button></div>}
@@ -1080,6 +1224,9 @@ function PlanTab({data, update, isDesktop, cook}) {
         <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
           {picker && RecipePickerContent()}
         </Overlay>
+        <Overlay open={showShop} onClose={()=>setShowShop(false)} title="Shopping for this week">
+          {showShop && <ShopFromPlan plan={plan} recipeMap={recipeMap} inventory={data.inventory} shopping={data.shopping} todayIdx={todayIdx} onAdd={addShopping} />}
+        </Overlay>
         <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
           {MealPrepOverlayContent()}
         </Overlay>
@@ -1129,7 +1276,10 @@ function PlanTab({data, update, isDesktop, cook}) {
       <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
         {picker && RecipePickerContent()}
       </Overlay>
-      <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
+      <Overlay open={showShop} onClose={()=>setShowShop(false)} title="Shopping for this week">
+          {showShop && <ShopFromPlan plan={plan} recipeMap={recipeMap} inventory={data.inventory} shopping={data.shopping} todayIdx={todayIdx} onAdd={addShopping} />}
+        </Overlay>
+        <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
         {MealPrepOverlayContent()}
       </Overlay>
     </div>
@@ -1180,7 +1330,7 @@ function RecipesTab({data, update, isDesktop, cook}) {
     if(!recipe.ingredients) return;
     update('shopping', list => {
       const items = recipe.ingredients.filter(i=>i.name.trim()).map(i => ({
-        id:genId(), name:i.name.trim(), qty:i.qty||'1', category:recipe.category||'Other',
+        id:genId(), name:i.name.trim(), qty:i.qty||'', category:guessCategory(i.name),
         checked:false, fromRecipe:recipe.name, addedAt:new Date().toISOString()
       }));
       return [...list, ...items];
