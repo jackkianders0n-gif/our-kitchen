@@ -45,6 +45,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent)}
 textarea{resize:vertical;min-height:80px}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes slideUp{from{transform:translateY(50px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
 @keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 
 /* Desktop overlay: centred modal instead of bottom sheet */
@@ -104,6 +105,7 @@ function getWeekStart(d) {
   date.setDate(date.getDate() - diff); date.setHours(0,0,0,0); return date;
 }
 const fmtDate = d => d.toISOString().split('T')[0];
+const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const parseDate = s => { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); };
 const addWeeks = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n*7); return r; };
 const daysBetween = (a,b) => Math.round((b-a)/86400000);
@@ -570,7 +572,7 @@ function AuthScreen({onLogin}) {
 }
 
 // ======================== PLAN TAB ========================
-function PlanTab({data, update, isDesktop}) {
+function PlanTab({data, update, isDesktop, cook}) {
   const {recipes, mealplans} = data;
   const [weekOffset, setWeekOffset] = useState(0);
   const [picker, setPicker] = useState(null);
@@ -739,11 +741,37 @@ function PlanTab({data, update, isDesktop}) {
     );
   }
 
+  // "Tonight" card: the next meal today that has a recipe
+  function TodayCard() {
+    if (weekOffset !== 0) return null;
+    const di = (new Date().getDay() + 1) % 7, day = DAYS[di];
+    const lunchId = cells[`${day}-Lunch`], dinnerId = cells[`${day}-Dinner`];
+    const pick = (new Date().getHours() < 14 && typeof lunchId === 'string' && recipeMap[lunchId]) ? ['Lunch today', recipeMap[lunchId]]
+      : (typeof dinnerId === 'string' && recipeMap[dinnerId]) ? ['Tonight', recipeMap[dinnerId]] : null;
+    if (!pick) return null;
+    const [label, r] = pick;
+    return (<div style={{...S.card,display:'flex',alignItems:'center',gap:12,marginBottom:16,background:'var(--accent-bg)',borderColor:'transparent'}}>
+      <span style={{fontSize:'1.6rem'}}>👩‍🍳</span>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--accent)'}}>{label}</div>
+        <div style={{...S.itemName,fontSize:'1rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name}</div>
+      </div>
+      <Btn primary sm onClick={()=>cook(r.id)}>Start cooking</Btn>
+    </div>);
+  }
+
   // Shared recipe picker overlay content (used in both mobile and desktop)
   function RecipePickerContent() {
     const isLunch = picker?.meal === 'Lunch';
+    const current = cells[`${picker.day}-${picker.meal}`];
+    const currentRecipe = typeof current === 'string' ? recipeMap[current] : null;
     const exactMatch = filtered.some(r => r.name?.trim().toLowerCase() === search.trim().toLowerCase());
     return (<div>
+      {currentRecipe && <div style={{...S.card,display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+        <CatDot cat={currentRecipe.category} />
+        <div style={{flex:1,minWidth:0,...S.itemName}}>{currentRecipe.name}</div>
+        <Btn primary sm onClick={()=>{setPicker(null);setSearch('');cook(currentRecipe.id)}}>👩‍🍳 Cook</Btn>
+      </div>}
       {cells[`${picker.day}-${picker.meal}`] && <Btn danger sm onClick={()=>assign(null)} style={{marginBottom:14}}>Clear</Btn>}
       <Btn secondary sm onClick={()=>assign('__OUT__')} style={{marginBottom:14,marginLeft:cells[`${picker.day}-${picker.meal}`]?8:0}}>🍽️ Out for dinner</Btn>
 
@@ -860,6 +888,7 @@ function PlanTab({data, update, isDesktop}) {
           <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(weekStart)?'This Week':fmtWeek(weekStart)}</span>
           <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
         </div>
+        {TodayCard()}
 
         <div style={S.planTable}>
           <div style={S.planHeader}></div>
@@ -909,6 +938,7 @@ function PlanTab({data, update, isDesktop}) {
         <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(weekStart)?'This Week':fmtWeek(weekStart)}</span>
         <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
       </div>
+      {TodayCard()}
 
       {DAYS.map((day,di) => (
         <div key={day} style={{marginBottom:12}}>
@@ -947,7 +977,7 @@ function PlanTab({data, update, isDesktop}) {
 }
 
 // ======================== RECIPES TAB ========================
-function RecipesTab({data, update, isDesktop}) {
+function RecipesTab({data, update, isDesktop, cook}) {
   const {recipes} = data;
   const [search, setSearch] = useState('');
   const [view, setView] = useState(null);
@@ -980,9 +1010,11 @@ function RecipesTab({data, update, isDesktop}) {
   }
 
   function deleteRecipe(id) {
+    if(!confirm('Delete this recipe?')) return;
     update('recipes', rs => rs.filter(r => r.id!==id));
     setView(null);
   }
+  function setRecipeField(id, k, v) { update('recipes', rs => rs.map(r => r.id===id ? {...r, [k]:v} : r)); }
 
   function addToList(recipe) {
     if(!recipe.ingredients) return;
@@ -997,6 +1029,8 @@ function RecipesTab({data, update, isDesktop}) {
   }
 
   const filtered = recipes.filter(r => r.name?.toLowerCase().includes(search.toLowerCase()));
+  // view: null | 'add' | 'edit' | recipe id (looked up so the detail shows live data)
+  const viewRecipe = typeof view==='string' && view!=='add' && view!=='edit' ? recipes.find(r=>r.id===view) : null;
 
   function RecipeForm() {
     const f = form;
@@ -1046,9 +1080,17 @@ function RecipesTab({data, update, isDesktop}) {
 
   function RecipeDetail({recipe}) {
     return (<div>
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+      <Btn primary style={{width:'100%',padding:'14px',fontSize:'1rem',marginBottom:16}} onClick={()=>{setView(null);cook(recipe.id)}}>👩‍🍳 Start cooking</Btn>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
         <CatDot cat={recipe.category} />
         <span style={{...S.badge,background:'var(--border)',color:'var(--text-muted)'}}>{recipe.category}</span>
+        <span style={{marginLeft:'auto'}}><Stars value={recipe.rating||0} onChange={v=>setRecipeField(recipe.id,'rating',v)} /></span>
+      </div>
+      {recipe.lastCooked && <div style={S.itemMeta}>Last cooked {relDate(recipe.lastCooked)}{recipe.cookLog?.length>1 && <> · cooked {recipe.cookLog.length} times</>}</div>}
+      <div style={{...S.field,marginTop:12,marginBottom:0}}>
+        <label style={S.label}>Notes for next time</label>
+        <textarea style={{minHeight:56}} defaultValue={recipe.notes||''} key={recipe.id+':'+(recipe.notes||'')} placeholder="e.g. Less chilli, double the sauce"
+          onBlur={e=>{ const v=e.target.value.trim(); if(v!==(recipe.notes||'')) setRecipeField(recipe.id,'notes',v); }} />
       </div>
       <div style={{display:'flex',gap:16,flexWrap:'wrap',margin:'12px 0'}}>
         {recipe.servings && <span style={{fontSize:'.82rem',color:'var(--text-muted)'}}><strong style={{color:'var(--text)',fontWeight:600}}>{recipe.servings}</strong> servings</span>}
@@ -1099,12 +1141,12 @@ function RecipesTab({data, update, isDesktop}) {
     ) : (
       <div style={isDesktop ? S.cardGrid : {}}>
         {filtered.map(r => (
-          <div key={r.id} style={{...S.card,cursor:'pointer'}} onClick={()=>setView(r)}>
+          <div key={r.id} style={{...S.card,cursor:'pointer'}} onClick={()=>setView(r.id)}>
             <div style={{display:'flex',alignItems:'center',gap:12}}>
               <span style={{fontSize:'1.2rem'}}>{CAT_EMOJI[r.category]||'📦'}</span>
               <div style={{flex:1,minWidth:0}}>
                 <div style={S.itemName}>{r.name}</div>
-                <div style={S.itemMeta}>{r.ingredients?.length||0} ingredients{r.lastPlanned && <> · Last planned {relDate(r.lastPlanned)}</>}</div>
+                <div style={S.itemMeta}>{r.rating>0 && <span style={{color:'#E0A030'}}>{'★'.repeat(r.rating)} · </span>}{r.ingredients?.length||0} ingredients{r.lastPlanned && <> · Last planned {relDate(r.lastPlanned)}</>}</div>
               </div>
             </div>
           </div>
@@ -1112,10 +1154,10 @@ function RecipesTab({data, update, isDesktop}) {
       </div>
     )}
     <Overlay open={view==='add'||view==='edit'} onClose={()=>{setView(null);setForm(null)}} title={view==='edit'?'Edit Recipe':'Add Recipe'}>
-      {form && <RecipeForm />}
+      {form && RecipeForm()}
     </Overlay>
-    <Overlay open={view&&typeof view==='object'&&view.id} onClose={()=>setView(null)} title={view?.name||''}>
-      {view?.id && <RecipeDetail recipe={view} />}
+    <Overlay open={!!viewRecipe} onClose={()=>setView(null)} title={viewRecipe?.name||''}>
+      {viewRecipe && RecipeDetail({recipe:viewRecipe})}
     </Overlay>
   </div>);
 }
@@ -1425,6 +1467,293 @@ function ShoppingTab({data, update, isDesktop}) {
   </div>);
 }
 
+// ======================== TIMERS ========================
+const NUM_WORDS = {a:1,an:1,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,fifteen:15,twenty:20,thirty:30,'forty-five':45,forty:40,fifty:50,sixty:60,'a couple of':2,'a few':3};
+const DUR_RE = /(?<![\w½])(half an hour|(\d+(?:[.,]\d+)?\s?½?|½|a couple of|a few|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty-five|forty|fifty|sixty)(?:\s*(?:-|–|to|or)\s*(\d+(?:[.,]\d+)?))?\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b(?:,?\s*(?:and\s*)?(\d+)\s*(?:minutes?|mins?|m)\b)?)/gi;
+function parseNum(s) {
+  s = s.trim().toLowerCase();
+  if (NUM_WORDS[s] != null) return NUM_WORDS[s];
+  const half = s.includes('½'); const n = parseFloat(s.replace('½','').replace(',','.'));
+  return (isNaN(n) ? 0 : n) + (half ? .5 : 0);
+}
+// Find cooking durations in a step, e.g. "simmer for 20-25 minutes" -> 20 min timer
+function findDurations(text) {
+  const out = []; let m; DUR_RE.lastIndex = 0;
+  while ((m = DUR_RE.exec(text || ''))) {
+    let secs;
+    if (/^half an hour$/i.test(m[1])) secs = 1800;
+    else {
+      const n = parseNum(m[2]); const u = m[4].toLowerCase();
+      const mult = u.startsWith('h') ? 3600 : u.startsWith('s') ? 1 : 60;
+      secs = Math.round(n * mult) + (m[5] ? parseInt(m[5]) * 60 : 0);
+    }
+    if (secs >= 5 && secs <= 24*3600) out.push({ start: m.index, end: m.index + m[0].length, text: m[0], secs });
+  }
+  return out;
+}
+function fmtClock(ms) {
+  const t = Math.max(0, Math.ceil(ms / 1000)); const h = Math.floor(t/3600), m = Math.floor(t%3600/60), s = t%60;
+  return (h ? h + ':' + String(m).padStart(2,'0') : m) + ':' + String(s).padStart(2,'0');
+}
+function fmtDur(secs) {
+  if (secs < 60) return secs + ' sec';
+  const h = Math.floor(secs/3600), m = Math.round(secs%3600/60);
+  return h ? `${h} hr${m ? ' ' + m + ' min' : ''}` : `${m} min`;
+}
+
+let audioCtx = null;
+function unlockAudio() {
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch(e) {}
+}
+function beep() {
+  try {
+    if (!audioCtx) return;
+    [0, .22, .44].forEach(off => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = audioCtx.currentTime + off;
+      o.type = 'sine'; o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + .02); g.gain.exponentialRampToValueAtTime(0.0001, t + .18);
+      o.start(t); o.stop(t + .2);
+    });
+  } catch(e) {}
+}
+
+function useTimers() {
+  const [timers, setTimers] = useState(() => { try { return JSON.parse(localStorage.getItem('kitchen_timers')) || []; } catch(e) { return []; } });
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { try { localStorage.setItem('kitchen_timers', JSON.stringify(timers)); } catch(e) {} }, [timers]);
+  const any = timers.length > 0;
+  useEffect(() => {
+    if (!any) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [any]);
+
+  const remaining = t => t.paused ? t.left : t.endAt - now;
+  const ringing = timers.filter(t => !t.paused && t.endAt <= now);
+  const ringKey = ringing.map(t => t.id).join(',');
+
+  // Alarm: beep + vibrate while any timer is done, and a notification if the app is in the background
+  useEffect(() => {
+    if (!ringing.length) return;
+    const fresh = ringing.filter(t => !t.notified);
+    if (fresh.length) {
+      if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
+        fresh.forEach(t => {
+          const title = `⏰ ${t.label} — done!`, opts = { body: t.recipeName || 'Timer finished', tag: 'timer-' + t.id, requireInteraction: true };
+          navigator.serviceWorker?.ready.then(reg => reg.showNotification(title, opts)).catch(() => { try { new Notification(title, opts); } catch(e) {} });
+        });
+      }
+      setTimers(ts => ts.map(t => fresh.some(f => f.id === t.id) ? { ...t, notified: true } : t));
+    }
+    let n = 0;
+    const ring = () => { if (n++ < 120) { beep(); try { navigator.vibrate?.([250, 120, 250]); } catch(e) {} } };
+    ring();
+    const iv = setInterval(ring, 1500);
+    return () => clearInterval(iv);
+  }, [ringKey]);
+
+  function start({ label, secs, recipeId, recipeName }) {
+    unlockAudio();
+    try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch(e) {}
+    setTimers(ts => [...ts, { id: genId(), label, total: secs, endAt: Date.now() + secs*1000, paused: false, recipeId, recipeName }]);
+  }
+  function toggle(id) {
+    unlockAudio();
+    setTimers(ts => ts.map(t => t.id !== id ? t : t.paused ? { ...t, paused: false, endAt: Date.now() + t.left } : { ...t, paused: true, left: Math.max(0, t.endAt - Date.now()) }));
+  }
+  function addTime(id, secs) {
+    setTimers(ts => ts.map(t => t.id !== id ? t : t.paused ? { ...t, left: t.left + secs*1000 } : { ...t, endAt: Math.max(t.endAt, Date.now()) + secs*1000, notified: false }));
+  }
+  function remove(id) { setTimers(ts => ts.filter(t => t.id !== id)); }
+  return { timers, remaining, ringing, start, toggle, addTime, remove };
+}
+
+function TimerChip({ t, T, big }) {
+  const left = T.remaining(t), done = !t.paused && left <= 0;
+  return (
+    <div style={{ display:'inline-flex', alignItems:'center', gap:4, borderRadius:999, padding: big ? '8px 8px 8px 14px' : '6px 6px 6px 12px',
+      background: done ? 'var(--accent)' : 'var(--surface)', color: done ? 'var(--accent-text)' : 'var(--text)', border:'1px solid ' + (done ? 'var(--accent)' : 'var(--border)'),
+      animation: done ? 'pulse 1s ease-in-out infinite' : undefined, fontVariantNumeric:'tabular-nums' }}>
+      <button onClick={() => done ? T.remove(t.id) : T.toggle(t.id)} aria-label={done ? 'Stop alarm' : t.paused ? 'Resume timer' : 'Pause timer'}
+        style={{ background:'none', border:'none', color:'inherit', cursor:'pointer', font:'inherit', fontSize: big ? '.95rem' : '.85rem', fontWeight:600, display:'flex', gap:8, alignItems:'center', padding:0 }}>
+        <span style={{ maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontWeight:500 }}>{done ? '🔔 ' : t.paused ? '⏸ ' : '⏱ '}{t.label}</span>
+        <span>{done ? 'Done · Stop' : fmtClock(left)}</span>
+      </button>
+      {!done && <button onClick={() => T.addTime(t.id, 60)} aria-label="Add a minute" style={chipBtn}>+1m</button>}
+      {!done && <button onClick={() => T.remove(t.id)} aria-label="Cancel timer" style={chipBtn}>×</button>}
+    </div>
+  );
+}
+const chipBtn = { background:'var(--accent-bg)', color:'var(--accent)', border:'none', borderRadius:999, cursor:'pointer', fontFamily:'inherit', fontSize:'.72rem', fontWeight:700, padding:'4px 8px', marginLeft:2 };
+
+// Floating timer shown outside cooking mode
+function TimerPill({ T, recipes, onOpen, isDesktop }) {
+  if (!T.timers.length) return null;
+  const sorted = [...T.timers].sort((a,b) => T.remaining(a) - T.remaining(b));
+  const top = T.ringing[0] || sorted[0];
+  const more = T.timers.length - 1;
+  const canOpen = top.recipeId && recipes.some(r => r.id === top.recipeId);
+  return (
+    <div style={{ position:'fixed', right:16, bottom: isDesktop ? 24 : 'calc(76px + env(safe-area-inset-bottom,0px))', zIndex:60, display:'flex', alignItems:'center', gap:6,
+      filter:'drop-shadow(0 4px 12px rgba(0,0,0,.15))' }}>
+      <TimerChip t={top} T={T} />
+      {(canOpen || more > 0) && <button style={{ ...chipBtn, padding:'8px 12px', fontSize:'.78rem', background:'var(--surface)', border:'1px solid var(--border)' }}
+        onClick={() => canOpen && onOpen(top.recipeId)}>{canOpen ? (more > 0 ? `Open · +${more}` : 'Open') : `+${more}`}</button>}
+    </div>
+  );
+}
+
+// ======================== COOKING MODE ========================
+function CookingMode({ recipe, T, step, setStep, onClose, onFinish }) {
+  const steps = recipe.method || [];
+  const ings = recipe.ingredients || [];
+  const last = steps.length + 1; // 0 = get ready, 1..n = steps, n+1 = finish
+  const [got, setGot] = useState({});
+  const [showIngs, setShowIngs] = useState(false);
+  const [custom, setCustom] = useState(null);
+  const [rating, setRating] = useState(recipe.rating || 0);
+  const [notes, setNotes] = useState(recipe.notes || '');
+  const touch = useRef(null);
+  const go = d => setStep(s => Math.max(0, Math.min(last, s + d)));
+
+  // Keep the screen on while cooking
+  useEffect(() => {
+    let lock = null, alive = true;
+    const req = async () => { try { if (alive && document.visibilityState === 'visible' && navigator.wakeLock) lock = await navigator.wakeLock.request('screen'); } catch(e) {} };
+    req();
+    const onVis = () => req();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; document.removeEventListener('visibilitychange', onVis); try { lock?.release(); } catch(e) {} };
+  }, []);
+  useEffect(() => {
+    const onKey = e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowRight') go(1); else if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [last]);
+
+  const myTimers = T.timers;
+  function startTimer(label, secs) { T.start({ label, secs, recipeId: recipe.id, recipeName: recipe.name }); }
+  // Name a timer after the clause it appears in, e.g. "Fry the onion for 5 mins" -> "Fry onion"
+  const STOP = new Set('the a an and or for in on to of with into until it then about over at from your some cook'.split(' '));
+  const stepLabel = (i, d) => {
+    const text = steps[i-1] || '';
+    const before = d ? text.slice(0, d.start) : text;
+    const clause = before.split(/[,.;:!?]|\bthen\b/i).map(c => c.trim()).filter(Boolean).pop() || '';
+    const words = clause.replace(/[^\p{L}\s-]/gu, ' ').split(/\s+/).filter(w => w && !STOP.has(w.toLowerCase())).slice(0, 3);
+    const t = words.join(' ');
+    return t ? t[0].toUpperCase() + t.slice(1).toLowerCase() : `Step ${i}`;
+  };
+
+  function StepText({ text, i }) {
+    const ds = findDurations(text); const parts = []; let pos = 0;
+    ds.forEach((d, k) => {
+      parts.push(text.slice(pos, d.start));
+      parts.push(<button key={k} onClick={() => startTimer(stepLabel(i, d), d.secs)} style={{ font:'inherit', color:'var(--accent)', background:'var(--accent-bg)', border:'none',
+        borderRadius:8, padding:'0 6px', cursor:'pointer', fontWeight:600 }}>⏱ {d.text}</button>);
+      pos = d.end;
+    });
+    parts.push(text.slice(pos));
+    return <p style={{ fontSize:'clamp(1.25rem, 4.5vw, 1.6rem)', lineHeight:1.5, fontWeight:400, margin:0 }}>{parts}</p>;
+  }
+
+  const pct = Math.round(step / last * 100);
+  const body = (() => {
+    if (step === 0) return (<div>
+      <div style={{ fontSize:'.78rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'var(--text-muted)', marginBottom:8 }}>Get ready</div>
+      <h2 style={{ fontSize:'1.6rem', marginBottom:8 }}>{recipe.name}</h2>
+      <div style={{ display:'flex', gap:16, flexWrap:'wrap', color:'var(--text-muted)', fontSize:'.9rem', marginBottom:16 }}>
+        {recipe.servings && <span>{recipe.servings} servings</span>}{recipe.prepTime && <span>{recipe.prepTime} prep</span>}{recipe.cookTime && <span>{recipe.cookTime} cook</span>}
+      </div>
+      {recipe.notes && <div style={{ background:'var(--warning-bg)', color:'var(--text)', borderRadius:12, padding:'12px 14px', marginBottom:16, fontSize:'.95rem', lineHeight:1.5 }}>
+        <strong>📝 Notes from last time:</strong> {recipe.notes}</div>}
+      {ings.length > 0 && <>
+        <div style={{ fontSize:'.85rem', color:'var(--text-muted)', marginBottom:6 }}>Tick things off as you get them out</div>
+        {ings.map((ing, i) => (
+          <div key={i} style={{ ...S.checkRow, cursor:'pointer', padding:'12px 0' }} onClick={() => setGot(g => ({ ...g, [i]: !g[i] }))}>
+            <span style={{ ...S.checkbox, ...(got[i] && S.checkboxOn) }}>{got[i] && Icon.check}</span>
+            <span style={{ flex:1, fontSize:'1.05rem', ...(got[i] && { textDecoration:'line-through', color:'var(--text-muted)' }) }}>{ing.name}</span>
+            <span style={{ color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{ing.qty}</span>
+          </div>))}
+      </>}
+      {steps.length === 0 && <p style={{ color:'var(--text-muted)', marginTop:16 }}>This recipe has no method steps yet. Add some by editing the recipe.</p>}
+    </div>);
+    if (step === last) return (<div style={{ textAlign:'center', paddingTop:24 }}>
+      <div style={{ fontSize:'3rem' }}>🍽️</div>
+      <h2 style={{ fontSize:'1.6rem', margin:'8px 0 20px' }}>Enjoy!</h2>
+      <div style={{ fontSize:'.85rem', color:'var(--text-muted)', marginBottom:8 }}>How was it?</div>
+      <Stars value={rating} onChange={setRating} size={36} />
+      <div style={{ textAlign:'left', marginTop:20 }}>
+        <label style={S.label}>Notes for next time</label>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Less chilli, needed 5 more minutes" />
+      </div>
+    </div>);
+    const text = steps[step - 1];
+    const ds = findDurations(text);
+    return (<div>
+      <div style={{ fontSize:'.78rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'var(--text-muted)', marginBottom:12 }}>Step {step} of {steps.length}</div>
+      {StepText({ text, i: step })}
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:24 }}>
+        {ds.map((d, k) => <Btn key={k} secondary onClick={() => startTimer(stepLabel(step, d), d.secs)}>⏱ Start {fmtDur(d.secs)} timer</Btn>)}
+        {custom === null
+          ? <Btn ghost onClick={() => setCustom('')}>+ Timer</Btn>
+          : <form style={{ display:'flex', gap:6, alignItems:'center' }} onSubmit={e => { e.preventDefault(); const m = parseFloat(custom); if (m > 0) { startTimer(stepLabel(step), Math.round(m*60)); setCustom(null); } }}>
+              <input autoFocus type="number" inputMode="decimal" min="0" step="any" value={custom} onChange={e => setCustom(e.target.value)} placeholder="Minutes" style={{ width:100 }} />
+              <Btn primary sm type="submit">Start</Btn><Btn ghost type="button" onClick={() => setCustom(null)}>Cancel</Btn>
+            </form>}
+      </div>
+    </div>);
+  })();
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:150, background:'var(--bg)', display:'flex', flexDirection:'column',
+      paddingTop:'env(safe-area-inset-top,0px)', paddingBottom:'env(safe-area-inset-bottom,0px)' }}>
+      <div style={{ maxWidth:720, width:'100%', margin:'0 auto', padding:'10px 16px 0', display:'flex', alignItems:'center', gap:10 }}>
+        <button style={S.overlayClose} onClick={onClose} aria-label="Exit cooking mode">&times;</button>
+        <div style={{ flex:1, minWidth:0, fontFamily:'Lora,Georgia,serif', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{recipe.name}</div>
+        {ings.length > 0 && step > 0 && step < last && <Btn secondary sm onClick={() => setShowIngs(true)}>Ingredients</Btn>}
+      </div>
+      <div style={{ maxWidth:720, width:'100%', margin:'10px auto 0', padding:'0 16px' }}>
+        <div style={{ height:4, background:'var(--border)', borderRadius:4 }}><div style={{ height:4, width:pct+'%', background:'var(--accent)', borderRadius:4, transition:'width .2s' }} /></div>
+      </div>
+      {myTimers.length > 0 && <div style={{ maxWidth:720, width:'100%', margin:'10px auto 0', padding:'0 16px', display:'flex', gap:8, flexWrap:'wrap' }}>
+        {myTimers.map(t => <TimerChip key={t.id} t={t} T={T} big />)}
+      </div>}
+      <div style={{ flex:1, overflowY:'auto', minHeight:0 }}
+        onTouchStart={e => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }}
+        onTouchEnd={e => { const s = touch.current; if (!s) return; const dx = e.changedTouches[0].clientX - s.x, dy = e.changedTouches[0].clientY - s.y;
+          if (Math.abs(dx) > 70 && Math.abs(dy) < 50 && e.target.tagName !== 'TEXTAREA') go(dx < 0 ? 1 : -1); touch.current = null; }}>
+        <div style={{ maxWidth:720, margin:'0 auto', padding:'24px 16px' }}>{body}</div>
+      </div>
+      <div style={{ maxWidth:720, width:'100%', margin:'0 auto', padding:'12px 16px 16px', display:'flex', gap:10 }}>
+        {step > 0 && <Btn secondary style={{ flex:1, padding:'16px' }} onClick={() => go(-1)}>Back</Btn>}
+        {step < last
+          ? <Btn primary style={{ flex:2, padding:'16px', fontSize:'1rem' }} onClick={() => go(1)}>{step === 0 ? (steps.length ? 'Start cooking' : 'Finish') : step === steps.length ? 'Finish' : 'Next step'}</Btn>
+          : <Btn primary style={{ flex:2, padding:'16px', fontSize:'1rem' }} onClick={() => onFinish({ rating, notes: notes.trim() })}>Save &amp; close</Btn>}
+      </div>
+      {showIngs && <div style={{ ...S.overlayBackdrop, zIndex:160 }} onClick={e => { if (e.target === e.currentTarget) setShowIngs(false); }}>
+        <div className="overlay-panel" style={S.overlayPanel}>
+          <div style={S.overlayHead}><h2 style={{ fontSize:'1.15rem' }}>Ingredients</h2><button style={S.overlayClose} onClick={() => setShowIngs(false)}>&times;</button></div>
+          {ings.map((ing, i) => (<div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'10px 0', borderBottom:'1px solid var(--border)', fontSize:'1rem' }}>
+            <span>{ing.name}</span><span style={{ color:'var(--text-muted)' }}>{ing.qty}</span></div>))}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+function Stars({ value, onChange, size = 22 }) {
+  return (<div style={{ display:'inline-flex', gap: size > 24 ? 6 : 2 }} role="radiogroup" aria-label="Rating">
+    {[1,2,3,4,5].map(n => (
+      <button key={n} role="radio" aria-checked={value === n} aria-label={`${n} star${n>1?'s':''}`} onClick={onChange ? () => onChange(value === n ? 0 : n) : undefined}
+        style={{ background:'none', border:'none', padding:2, cursor: onChange ? 'pointer' : 'default', fontSize:size, lineHeight:1, color: n <= value ? '#E0A030' : 'var(--border)' }}>★</button>
+    ))}
+  </div>);
+}
+
 // ======================== TAB BAR ========================
 function TabBar({tab, setTab, isDesktop}) {
   const tabs = [{id:'plan',label:'Plan',icon:Icon.plan},{id:'recipes',label:'Recipes',icon:Icon.recipes},{id:'pantry',label:'Pantry',icon:Icon.pantry},{id:'list',label:'List',icon:Icon.list}];
@@ -1469,6 +1798,16 @@ function App() {
 function MainApp({session, tab, setTab}) {
   const {data, update, sync} = useKitchenData(session.user.id);
   const isDesktop = useMediaQuery('(min-width: 768px)');
+  const T = useTimers();
+  const [cooking, setCooking] = useState(() => { try { return JSON.parse(localStorage.getItem('kitchen_cooking')); } catch(e) { return null; } });
+  useEffect(() => { try { cooking ? localStorage.setItem('kitchen_cooking', JSON.stringify(cooking)) : localStorage.removeItem('kitchen_cooking'); } catch(e) {} }, [cooking]);
+  const cookRecipe = cooking?.open && data.recipes.find(r => r.id === cooking.recipeId);
+  function startCooking(id) { setCooking(c => c?.recipeId === id ? { ...c, open: true } : { recipeId: id, step: 0, open: true }); }
+  function finishCooking({ rating, notes }) {
+    const today = localDate();
+    update('recipes', rs => rs.map(r => r.id !== cooking.recipeId ? r : { ...r, rating: rating || 0, notes, lastCooked: today, cookLog: [...(r.cookLog || []), today] }));
+    setCooking(null);
+  }
 
   async function logout() {
     await sb.auth.signOut();
@@ -1509,8 +1848,8 @@ function MainApp({session, tab, setTab}) {
           ...(isDesktop && S.contentDesktop),
         }}>
           <div style={{maxWidth:'var(--content-max)',margin:isDesktop?'0 auto':undefined,width:'100%'}}>
-            {tab==='plan' && <PlanTab data={data} update={update} isDesktop={isDesktop} />}
-            {tab==='recipes' && <RecipesTab data={data} update={update} isDesktop={isDesktop} />}
+            {tab==='plan' && <PlanTab data={data} update={update} isDesktop={isDesktop} cook={startCooking} />}
+            {tab==='recipes' && <RecipesTab data={data} update={update} isDesktop={isDesktop} cook={startCooking} />}
             {tab==='pantry' && <PantryTab data={data} update={update} isDesktop={isDesktop} />}
             {tab==='list' && <ShoppingTab data={data} update={update} isDesktop={isDesktop} />}
           </div>
@@ -1519,6 +1858,11 @@ function MainApp({session, tab, setTab}) {
         {/* Mobile tab bar */}
         {!isDesktop && <TabBar tab={tab} setTab={setTab} isDesktop={false} />}
       </div>
+      {cookRecipe
+        ? <CookingMode key={cookRecipe.id} recipe={cookRecipe} T={T} step={cooking.step || 0}
+            setStep={fn => setCooking(c => ({ ...c, step: typeof fn === 'function' ? fn(c.step || 0) : fn }))}
+            onClose={() => setCooking(c => ({ ...c, open: false }))} onFinish={finishCooking} />
+        : <TimerPill T={T} recipes={data.recipes} onOpen={startCooking} isDesktop={isDesktop} />}
     </div>
   );
 }
