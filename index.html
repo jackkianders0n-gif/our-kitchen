@@ -459,19 +459,46 @@ function PlanTab({data, update, isDesktop}) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [picker, setPicker] = useState(null);
   const [search, setSearch] = useState('');
+  const [mealPrepOverlay, setMealPrepOverlay] = useState(null); // null | 'pick' | 'days'
+  const [mealPrepRecipe, setMealPrepRecipe] = useState(null);
+  const [mealPrepDays, setMealPrepDays] = useState({});
+  const [mealPrepSearch, setMealPrepSearch] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
 
   const weekStart = useMemo(() => addWeeks(getWeekStart(), weekOffset), [weekOffset]);
   const weekKey = fmtDate(weekStart);
   const plan = mealplans[weekKey] || {};
   const cells = plan.cells || {};
+  const mealPrep = plan.mealPrep || null; // {recipeId, days: ['Mon','Wed','Fri']}
   const recipeMap = useMemo(() => { const m={}; recipes.forEach(r=>m[r.id]=r); return m; }, [recipes]);
+
+  // Get meal prep history (last 12 weeks, excluding current)
+  const mealPrepHistory = useMemo(() => {
+    const history = [];
+    for (let i = 1; i <= 16; i++) {
+      const wk = fmtDate(addWeeks(getWeekStart(), weekOffset - i));
+      const p = mealplans[wk];
+      if (p?.mealPrep?.recipeId) {
+        const r = recipeMap[p.mealPrep.recipeId];
+        if (r) history.push({ weekKey: wk, recipeId: p.mealPrep.recipeId, recipeName: r.name, days: p.mealPrep.days, category: r.category });
+      }
+      if (history.length >= 12) break;
+    }
+    return history;
+  }, [mealplans, weekOffset, recipeMap]);
+
+  // Recent meal prep recipe IDs (deduplicated, for showing in lunch picker)
+  const recentMealPrepRecipes = useMemo(() => {
+    const seen = new Set();
+    return mealPrepHistory.filter(h => { if (seen.has(h.recipeId)) return false; seen.add(h.recipeId); return true; }).slice(0, 5);
+  }, [mealPrepHistory]);
 
   function assign(val) {
     if(!picker) return;
     const key = `${picker.day}-${picker.meal}`;
     const newCells = {...cells};
     if(val) newCells[key] = val; else delete newCells[key];
-    const newPlans = {...mealplans, [weekKey]: {cells:newCells, updatedAt:new Date().toISOString()}};
+    const newPlans = {...mealplans, [weekKey]: {...(mealplans[weekKey]||{}), cells:newCells, updatedAt:new Date().toISOString()}};
     update('mealplans', newPlans);
     if(val && val !== '__OUT__') {
       update('recipes', rs => rs.map(r => r.id===val ? {...r, lastPlanned:weekKey} : r));
@@ -479,7 +506,212 @@ function PlanTab({data, update, isDesktop}) {
     setPicker(null); setSearch('');
   }
 
+  function openMealPrep() {
+    setMealPrepOverlay('pick');
+    setMealPrepRecipe(null);
+    setMealPrepDays({});
+    setMealPrepSearch('');
+  }
+
+  function pickMealPrepRecipe(recipeId) {
+    setMealPrepRecipe(recipeId);
+    setMealPrepOverlay('days');
+    setMealPrepDays({});
+  }
+
+  function toggleMealPrepDay(day) {
+    setMealPrepDays(prev => ({...prev, [day]: !prev[day]}));
+  }
+
+  function confirmMealPrep() {
+    if (!mealPrepRecipe) return;
+    const selectedDays = DAYS.filter(d => mealPrepDays[d]);
+    if (selectedDays.length === 0) return;
+    const newCells = {...cells};
+    selectedDays.forEach(day => { newCells[`${day}-Lunch`] = mealPrepRecipe; });
+    const newPlans = {...mealplans, [weekKey]: {
+      ...(mealplans[weekKey]||{}),
+      cells: newCells,
+      mealPrep: { recipeId: mealPrepRecipe, days: selectedDays },
+      updatedAt: new Date().toISOString()
+    }};
+    update('mealplans', newPlans);
+    update('recipes', rs => rs.map(r => r.id===mealPrepRecipe ? {...r, lastPlanned:weekKey} : r));
+    setMealPrepOverlay(null); setMealPrepRecipe(null); setMealPrepDays({});
+  }
+
+  function reuseMealPrep(h) {
+    setMealPrepRecipe(h.recipeId);
+    const dayMap = {};
+    h.days.forEach(d => dayMap[d] = true);
+    setMealPrepDays(dayMap);
+    setMealPrepOverlay('days');
+  }
+
+  function clearMealPrep() {
+    if (!mealPrep) return;
+    const newCells = {...cells};
+    (mealPrep.days||[]).forEach(day => { if(newCells[`${day}-Lunch`] === mealPrep.recipeId) delete newCells[`${day}-Lunch`]; });
+    const newPlan = {...(mealplans[weekKey]||{}), cells:newCells, updatedAt:new Date().toISOString()};
+    delete newPlan.mealPrep;
+    update('mealplans', {...mealplans, [weekKey]: newPlan});
+  }
+
   const filtered = recipes.filter(r => r.name?.toLowerCase().includes(search.toLowerCase()));
+  const mealPrepFiltered = recipes.filter(r => r.name?.toLowerCase().includes(mealPrepSearch.toLowerCase()));
+  const selectedDayCount = DAYS.filter(d => mealPrepDays[d]).length;
+
+  // Shared meal prep section (used in both mobile and desktop)
+  function MealPrepSection() {
+    const mpRecipe = mealPrep ? recipeMap[mealPrep.recipeId] : null;
+    return (
+      <div style={{marginTop:20}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+          <div style={S.sectionTitle}>🥡 Meal Prep</div>
+          {mealPrepHistory.length > 0 && (
+            <button style={S.btnGhost} onClick={()=>setShowHistory(!showHistory)}>
+              {showHistory ? 'Hide history' : 'History'}
+            </button>
+          )}
+        </div>
+
+        {mealPrep && mpRecipe ? (
+          <div style={{...S.card,display:'flex',alignItems:'center',gap:12}}>
+            <span style={{fontSize:'1.2rem'}}>{CAT_EMOJI[mpRecipe.category]||'📦'}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={S.itemName}>{mpRecipe.name}</div>
+              <div style={S.itemMeta}>{mealPrep.days.join(', ')}</div>
+            </div>
+            <div style={{display:'flex',gap:4,flexShrink:0}}>
+              <Btn secondary sm onClick={openMealPrep}>Change</Btn>
+              <Btn danger sm onClick={clearMealPrep}>Clear</Btn>
+            </div>
+          </div>
+        ) : (
+          <div style={{...S.card,textAlign:'center',padding:'16px'}}>
+            <div style={{color:'var(--text-muted)',fontSize:'.85rem',marginBottom:10}}>No meal prep set for this week</div>
+            <Btn primary sm onClick={openMealPrep}>Set Meal Prep</Btn>
+          </div>
+        )}
+
+        {showHistory && mealPrepHistory.length > 0 && (
+          <div style={{marginTop:10}}>
+            <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6}}>Last 12 weeks</div>
+            {mealPrepHistory.map((h,i) => (
+              <div key={i} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>reuseMealPrep(h)}>
+                <CatDot cat={h.category} />
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={S.itemName}>{h.recipeName}</div>
+                  <div style={S.itemMeta}>{relDate(h.weekKey)} · {h.days.join(', ')}</div>
+                </div>
+                <Btn secondary sm>Reuse</Btn>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Shared recipe picker overlay content (used in both mobile and desktop)
+  function RecipePickerContent() {
+    const isLunch = picker?.meal === 'Lunch';
+    return (<div>
+      {cells[`${picker.day}-${picker.meal}`] && <Btn danger sm onClick={()=>assign(null)} style={{marginBottom:14}}>Clear</Btn>}
+      <Btn secondary sm onClick={()=>assign('__OUT__')} style={{marginBottom:14,marginLeft:cells[`${picker.day}-${picker.meal}`]?8:0}}>🍽️ Out for dinner</Btn>
+
+      {/* Recent meal preps shown at top of lunch picker */}
+      {isLunch && recentMealPrepRecipes.length > 0 && !search && (
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6}}>🥡 Recent meal preps</div>
+          {recentMealPrepRecipes.map(h => (
+            <div key={h.recipeId} style={{...S.itemRow,cursor:'pointer',padding:'8px 0'}} onClick={()=>assign(h.recipeId)}>
+              <CatDot cat={h.category} />
+              <div style={{flex:1,minWidth:0}}>
+                <div style={S.itemName}>{h.recipeName}</div>
+              </div>
+            </div>
+          ))}
+          <div style={{borderBottom:'1px solid var(--border)',margin:'6px 0'}} />
+        </div>
+      )}
+
+      <div style={{position:'relative',marginBottom:14}}>
+        <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
+        <input style={{paddingLeft:36}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
+      </div>
+      {filtered.length===0 ? <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes found. Add some in the Recipes tab.</p>
+      : filtered.map(r => (
+        <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(r.id)}>
+          <CatDot cat={r.category} />
+          <div style={{flex:1,minWidth:0}}>
+            <div style={S.itemName}>{r.name}</div>
+            {r.lastPlanned && <div style={S.itemMeta}>Last planned {relDate(r.lastPlanned)}</div>}
+          </div>
+        </div>
+      ))}
+    </div>);
+  }
+
+  // Meal prep overlay content
+  function MealPrepOverlayContent() {
+    if (mealPrepOverlay === 'pick') {
+      return (<div>
+        <p style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:14}}>Pick a recipe to meal prep this week.</p>
+
+        {recentMealPrepRecipes.length > 0 && !mealPrepSearch && (
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6}}>Recent meal preps</div>
+            {recentMealPrepRecipes.map(h => (
+              <div key={h.recipeId} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>pickMealPrepRecipe(h.recipeId)}>
+                <CatDot cat={h.category} />
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={S.itemName}>{h.recipeName}</div>
+                </div>
+              </div>
+            ))}
+            <div style={{borderBottom:'1px solid var(--border)',margin:'6px 0'}} />
+          </div>
+        )}
+
+        <div style={{position:'relative',marginBottom:14}}>
+          <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
+          <input style={{paddingLeft:36}} placeholder="Search recipes…" value={mealPrepSearch} onChange={e=>setMealPrepSearch(e.target.value)} />
+        </div>
+        {mealPrepFiltered.map(r => (
+          <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>pickMealPrepRecipe(r.id)}>
+            <CatDot cat={r.category} />
+            <div style={{flex:1,minWidth:0}}>
+              <div style={S.itemName}>{r.name}</div>
+            </div>
+          </div>
+        ))}
+      </div>);
+    }
+    if (mealPrepOverlay === 'days') {
+      const r = recipeMap[mealPrepRecipe];
+      return (<div>
+        <div style={{...S.card,display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+          <span style={{fontSize:'1.1rem'}}>{CAT_EMOJI[r?.category]||'📦'}</span>
+          <div style={{fontWeight:600}}>{r?.name||'Recipe'}</div>
+          <button style={S.btnGhost} onClick={()=>{setMealPrepOverlay('pick');setMealPrepSearch('')}}>Change</button>
+        </div>
+        <p style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:14}}>Which days will you have this for lunch?</p>
+        {DAYS.map(day => (
+          <div key={day} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:'1px solid var(--border)',cursor:'pointer'}} onClick={()=>toggleMealPrepDay(day)}>
+            <button style={{...S.checkbox,...(mealPrepDays[day]&&S.checkboxOn)}}>{mealPrepDays[day]&&Icon.check}</button>
+            <span style={{fontWeight:500,fontSize:'.9rem'}}>{day}</span>
+          </div>
+        ))}
+        <div style={{marginTop:16}}>
+          <Btn primary onClick={confirmMealPrep} disabled={selectedDayCount===0}>
+            Set Meal Prep ({selectedDayCount} day{selectedDayCount!==1?'s':''})
+          </Btn>
+        </div>
+      </div>);
+    }
+    return null;
+  }
 
   // Desktop table view
   if (isDesktop) {
@@ -493,11 +725,8 @@ function PlanTab({data, update, isDesktop}) {
         </div>
 
         <div style={S.planTable}>
-          {/* Header row */}
           <div style={S.planHeader}></div>
           {DAYS.map(day => <div key={day} style={S.planHeader}>{day}</div>)}
-
-          {/* Meal rows */}
           {MEALS.map(meal => (
             <React.Fragment key={meal}>
               <div style={S.planMealLabel}>{meal}</div>
@@ -520,25 +749,13 @@ function PlanTab({data, update, isDesktop}) {
           ))}
         </div>
 
+        <MealPrepSection />
+
         <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
-          {picker && (<div>
-            {cells[`${picker.day}-${picker.meal}`] && <Btn danger sm onClick={()=>assign(null)} style={{marginBottom:14}}>Clear</Btn>}
-            <Btn secondary sm onClick={()=>assign('__OUT__')} style={{marginBottom:14,marginLeft:cells[`${picker.day}-${picker.meal}`]?8:0}}>🍽️ Out for dinner</Btn>
-            <div style={{position:'relative',marginBottom:14}}>
-              <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
-              <input style={{paddingLeft:36}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
-            </div>
-            {filtered.length===0 ? <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes found. Add some in the Recipes tab.</p>
-            : filtered.map(r => (
-              <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(r.id)}>
-                <CatDot cat={r.category} />
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={S.itemName}>{r.name}</div>
-                  {r.lastPlanned && <div style={S.itemMeta}>Last planned {relDate(r.lastPlanned)}</div>}
-                </div>
-              </div>
-            ))}
-          </div>)}
+          {picker && <RecipePickerContent />}
+        </Overlay>
+        <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
+          <MealPrepOverlayContent />
         </Overlay>
       </div>
     );
@@ -576,25 +793,13 @@ function PlanTab({data, update, isDesktop}) {
         </div>
       ))}
 
+      <MealPrepSection />
+
       <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
-        {picker && (<div>
-          {cells[`${picker.day}-${picker.meal}`] && <Btn danger sm onClick={()=>assign(null)} style={{marginBottom:14}}>Clear</Btn>}
-          <Btn secondary sm onClick={()=>assign('__OUT__')} style={{marginBottom:14,marginLeft:cells[`${picker.day}-${picker.meal}`]?8:0}}>🍽️ Out for dinner</Btn>
-          <div style={{position:'relative',marginBottom:14}}>
-            <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
-            <input style={{paddingLeft:36}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
-          </div>
-          {filtered.length===0 ? <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes found. Add some in the Recipes tab.</p>
-          : filtered.map(r => (
-            <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(r.id)}>
-              <CatDot cat={r.category} />
-              <div style={{flex:1,minWidth:0}}>
-                <div style={S.itemName}>{r.name}</div>
-                {r.lastPlanned && <div style={S.itemMeta}>Last planned {relDate(r.lastPlanned)}</div>}
-              </div>
-            </div>
-          ))}
-        </div>)}
+        {picker && <RecipePickerContent />}
+      </Overlay>
+      <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
+        <MealPrepOverlayContent />
       </Overlay>
     </div>
   );
