@@ -69,7 +69,7 @@ const {useState,useEffect,useCallback,useMemo,useRef,createContext,useContext} =
 // ======================== CONFIG ========================
 const SUPABASE_URL = 'https://wvedhcuebfdfkhfvphlb.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_bkeGnvruQEz3MsVDZiJ03g_bhXXDjgC';
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: 'kitchen-auth' }
 });
@@ -1286,12 +1286,98 @@ function PlanTab({data, update, isDesktop, cook}) {
   );
 }
 
+// ======================== RECIPE IMPORT ========================
+// Turns schema.org Recipe data (from the import-recipe Supabase function) into this app's recipe shape.
+function plainText(s) {
+  if (s == null) return '';
+  try { return (new DOMParser().parseFromString(String(s), 'text/html').body.textContent || '').replace(/\s+/g, ' ').trim(); }
+  catch(e) { return String(s).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
+}
+function isoDuration(s) {
+  const m = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i.exec(String(s || '').trim());
+  if (!m) return plainText(s);
+  const mins = (+m[1]||0)*1440 + (+m[2]||0)*60 + (+m[3]||0) + Math.round((+m[4]||0)/60);
+  if (!mins) return '';
+  const h = Math.floor(mins/60), mm = mins % 60;
+  return [h && `${h} hr${h>1?'s':''}`, mm && `${mm} min${mm>1?'s':''}`].filter(Boolean).join(' ');
+}
+const ING_UNIT = '(?:g|kg|mg|ml|l|oz|lb|lbs|pounds?|ounces?|grams?|kilograms?|litres?|liters?|pints?|tsp|tbsp|tbs|teaspoons?|tablespoons?|cups?|cloves?|tins?|cans?|packs?|packets?|bunch(?:es)?|handfuls?|pinch(?:es)?|slices?|jars?|sprigs?|sticks?|heads?|fillets?|rashers?|knobs?|sachets?|bags?)';
+const ING_NUM = '(?:\\d+\\s+\\d+\\/\\d+|\\d+\\/\\d+|\\d*\\.?\\d+\\s*[½¼¾⅓⅔]?|[½¼¾⅓⅔])';
+const ING_RE = new RegExp(`^(${ING_NUM}(?:\\s*(?:-|–|to)\\s*${ING_NUM})?(?:\\s*x\\s*${ING_NUM})?(?:\\s*${ING_UNIT}\\b\\.?){0,2}(?:\\s*\\/\\s*${ING_NUM}\\s*(?:fl\\s*)?(?:oz|lb|ml|g)\\b)?)\\s+(?:of\\s+)?(.+)$`, 'i');
+function splitIngredient(line) {
+  const t = plainText(line);
+  const m = ING_RE.exec(t);
+  const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+  return m ? { qty: m[1].replace(/\s+/g, ' ').trim(), name: cap(m[2].trim()) } : { qty: '', name: cap(t) };
+}
+function flattenSteps(ins) {
+  if (!ins) return [];
+  if (typeof ins === 'string') {
+    const t = ins.replace(/<\/(p|li)>|<br\s*\/?>/gi, '\n');
+    return t.split(/\n+/).map(plainText).filter(Boolean);
+  }
+  if (Array.isArray(ins)) return ins.flatMap(flattenSteps);
+  if (typeof ins === 'object') {
+    if (ins.itemListElement) return flattenSteps(ins.itemListElement);
+    return flattenSteps(ins.text || ins.name || '');
+  }
+  return [];
+}
+function firstImage(img) {
+  if (!img) return '';
+  if (typeof img === 'string') return img;
+  if (Array.isArray(img)) return firstImage(img[0]);
+  return img.url || img.contentUrl || '';
+}
+function normalizeImported(r, url) {
+  const name = plainText(r.name) || 'Imported recipe';
+  const yields = [].concat(r.recipeYield || []).map(String);
+  const servings = (yields.map(y => (y.match(/\d+/) || [])[0]).find(Boolean)) || '';
+  let prep = isoDuration(r.prepTime), cook = isoDuration(r.cookTime);
+  if (!prep && !cook && r.totalTime) cook = isoDuration(r.totalTime);
+  const ingredients = [].concat(r.recipeIngredient || []).map(splitIngredient).filter(i => i.name);
+  const method = flattenSteps(r.recipeInstructions);
+  const guess = guessCategory(name);
+  return {
+    name, servings, prepTime: prep, cookTime: cook,
+    category: guess !== 'Other' ? guess : 'Other',
+    ingredients: ingredients.length ? ingredients : [{ name:'', qty:'' }],
+    method: method.length ? method : [''],
+    source: url, image: firstImage(r.image),
+  };
+}
+
 // ======================== RECIPES TAB ========================
-function RecipesTab({data, update, isDesktop, cook}) {
+function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
   const {recipes} = data;
   const [search, setSearch] = useState('');
   const [view, setView] = useState(null);
   const [form, setForm] = useState(null);
+  const [imp, setImp] = useState(null); // {url, busy, error, existingId}
+
+  async function runImport(rawUrl) {
+    const url = (rawUrl || '').trim();
+    if (!/^https?:\/\//i.test(url)) { setImp(i => ({...i, url, busy:false, error:'Paste a full link starting with http:// or https://'})); return; }
+    const existing = recipes.find(r => r.source && r.source.replace(/[#?].*$/,'') === url.replace(/[#?].*$/,''));
+    if (existing) { setImp(i => ({...i, url, busy:false, error:`You already have this one: ${existing.name}`, existingId: existing.id})); return; }
+    setImp(i => ({...i, url, busy:true, error:null, existingId:null}));
+    try {
+      const { data:res, error } = await sb.functions.invoke('import-recipe', { body: { url } });
+      if (error) {
+        const status = error.context?.status;
+        let msg = !navigator.onLine ? "You're offline. Try again when you're connected."
+          : (status === 404 || error.name === 'FunctionsFetchError' || error.name === 'FunctionsRelayError')
+            ? "Link import isn't set up yet: the import-recipe function needs deploying to Supabase."
+            : status === 401 ? 'Please log out and back in, then try again.' : "Couldn't import that link. Try again in a moment.";
+        try { const b = await error.context?.json?.(); if (b?.error && status !== 404) msg = b.error; } catch(e) {}
+        setImp(i => ({...i, busy:false, error: msg})); return;
+      }
+      if (!res?.recipe) { setImp(i => ({...i, busy:false, error: res?.error || "Couldn't find a recipe on that page."})); return; }
+      setForm(normalizeImported(res.recipe, res.url || url));
+      setImp(null); setView('add');
+    } catch(e) { setImp(i => ({...i, busy:false, error:"Couldn't import that link. Try again in a moment."})); }
+  }
+  useEffect(() => { if (sharedUrl) { setView(null); setImp({ url: sharedUrl }); runImport(sharedUrl); clearShared(); } }, [sharedUrl]);
 
   function openAdd() {
     setForm({name:'',servings:'4',prepTime:'',cookTime:'',category:'Other',ingredients:[{name:'',qty:''}],method:['']});
@@ -1307,6 +1393,7 @@ function RecipesTab({data, update, isDesktop, cook}) {
     const rec = {
       name:form.name.trim(), servings:form.servings||'4', prepTime:form.prepTime||'', cookTime:form.cookTime||'',
       category:form.category||'Other',
+      ...(form.source ? {source:form.source} : {}), ...(form.image ? {image:form.image} : {}),
       ingredients:form.ingredients.filter(i=>i.name.trim()).map(i=>({name:i.name.trim(),qty:i.qty.trim()})),
       method:form.method.filter(s=>s.trim()),
     };
@@ -1352,6 +1439,8 @@ function RecipesTab({data, update, isDesktop, cook}) {
     const addStep = () => set('method',[...f.method,'']);
     const rmStep = i => set('method',f.method.filter((_,idx)=>idx!==i));
     return (<div>
+      {f.source && !f.id && <div style={{background:'var(--success-bg)',borderRadius:10,padding:'10px 12px',fontSize:'.85rem',marginBottom:14}}>
+        Imported from <strong>{(()=>{try{return new URL(f.source).hostname.replace(/^www\./,'')}catch(e){return 'the web'}})()}</strong>. Check it over, then save.</div>}
       <div style={S.field}><label style={S.label}>Name</label><input value={f.name} onChange={e=>set('name',e.target.value)} placeholder="Recipe name" /></div>
       <div style={S.fieldRow}>
         <div style={{...S.field,flex:1}}><label style={S.label}>Servings</label><input value={f.servings} onChange={e=>set('servings',e.target.value)} placeholder="4" /></div>
@@ -1390,6 +1479,8 @@ function RecipesTab({data, update, isDesktop, cook}) {
 
   function RecipeDetail({recipe}) {
     return (<div>
+      {recipe.image && <img src={recipe.image} alt="" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display='none'}}
+        style={{width:'100%',maxHeight:220,objectFit:'cover',borderRadius:12,marginBottom:14,display:'block',background:'var(--border)'}} />}
       <Btn primary style={{width:'100%',padding:'14px',fontSize:'1rem',marginBottom:16}} onClick={()=>{setView(null);cook(recipe.id)}}>👩‍🍳 Start cooking</Btn>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
         <CatDot cat={recipe.category} />
@@ -1427,6 +1518,7 @@ function RecipesTab({data, update, isDesktop, cook}) {
       </>)}
       <div style={{display:'flex',gap:8,marginTop:18,flexWrap:'wrap'}}>
         <Btn primary sm onClick={()=>addToList(recipe)}>Add to List</Btn>
+        {recipe.source && <a href={recipe.source} target="_blank" rel="noopener noreferrer" style={{...S.btn,...S.btnSecondary,...S.btnSm,textDecoration:'none'}}>Original ↗</a>}
         <Btn secondary sm onClick={()=>openEdit(recipe)}>Edit</Btn>
         <Btn danger sm onClick={()=>deleteRecipe(recipe.id)}>Delete</Btn>
       </div>
@@ -1436,7 +1528,10 @@ function RecipesTab({data, update, isDesktop, cook}) {
   return (<div>
     <div style={S.pageHead}>
       <h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em',flex:1}}>Recipes</h1>
-      <Btn primary sm onClick={openAdd}>+ Add</Btn>
+      <div style={{display:'flex',gap:6}}>
+        <Btn secondary sm onClick={()=>setImp({url:''})}>🔗 Import</Btn>
+        <Btn primary sm onClick={openAdd}>+ Add</Btn>
+      </div>
     </div>
     {recipes.length>0 && (
       <div style={{position:'relative',marginBottom:14}}>
@@ -1463,6 +1558,17 @@ function RecipesTab({data, update, isDesktop, cook}) {
         ))}
       </div>
     )}
+    <Overlay open={!!imp} onClose={()=>setImp(null)} title="Import from a link">
+      {imp && <form onSubmit={e=>{e.preventDefault(); runImport(imp.url);}}>
+        <p style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:12}}>Paste a link to a recipe page (BBC Good Food, a food blog…). You'll get to check it before saving.</p>
+        <div style={S.field}><input type="url" inputMode="url" autoFocus placeholder="https://…" value={imp.url} disabled={imp.busy}
+          onChange={e=>{ const url = e.target.value; setImp(i=>({...i, url, error:null, existingId:null})); }} /></div>
+        {imp.error && <div style={{background:'var(--danger-bg)',color:'var(--danger)',borderRadius:10,padding:'10px 14px',fontSize:'.85rem',marginBottom:14}}>
+          {imp.error}{imp.existingId && <> · <button type="button" style={{...S.btnGhost,padding:0,color:'inherit',textDecoration:'underline'}} onClick={()=>{const id=imp.existingId;setImp(null);setView(id);}}>Open it</button></>}
+        </div>}
+        <Btn primary type="submit" style={{width:'100%'}} disabled={imp.busy || !imp.url.trim()}>{imp.busy ? 'Fetching recipe…' : 'Import'}</Btn>
+      </form>}
+    </Overlay>
     <Overlay open={view==='add'||view==='edit'} onClose={()=>{setView(null);setForm(null)}} title={view==='edit'?'Edit Recipe':'Add Recipe'}>
       {form && RecipeForm()}
     </Overlay>
@@ -2109,6 +2215,17 @@ function MainApp({session, tab, setTab}) {
   const {data, update, sync} = useKitchenData(session.user.id);
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const T = useTimers();
+  // Android "Share → Our Kitchen" from a browser opens the app with the link in the URL
+  const [sharedUrl, setSharedUrl] = useState(() => {
+    try {
+      const q = new URLSearchParams(location.search);
+      const raw = [q.get('share_url'), q.get('share_text'), q.get('share_title')].filter(Boolean).join(' ');
+      const m = raw.match(/https?:\/\/\S+/);
+      if (q.has('share_url') || q.has('share_text')) history.replaceState(null, '', location.pathname);
+      return m ? m[0] : null;
+    } catch(e) { return null; }
+  });
+  useEffect(() => { if (sharedUrl) setTab('recipes'); }, [sharedUrl]);
   const [cooking, setCooking] = useState(() => { try { return JSON.parse(localStorage.getItem('kitchen_cooking')); } catch(e) { return null; } });
   useEffect(() => { try { cooking ? localStorage.setItem('kitchen_cooking', JSON.stringify(cooking)) : localStorage.removeItem('kitchen_cooking'); } catch(e) {} }, [cooking]);
   const cookRecipe = cooking?.open && data.recipes.find(r => r.id === cooking.recipeId);
@@ -2159,7 +2276,7 @@ function MainApp({session, tab, setTab}) {
         }}>
           <div style={{maxWidth:'var(--content-max)',margin:isDesktop?'0 auto':undefined,width:'100%'}}>
             {tab==='plan' && <PlanTab data={data} update={update} isDesktop={isDesktop} cook={startCooking} />}
-            {tab==='recipes' && <RecipesTab data={data} update={update} isDesktop={isDesktop} cook={startCooking} />}
+            {tab==='recipes' && <RecipesTab data={data} update={update} isDesktop={isDesktop} cook={startCooking} sharedUrl={sharedUrl} clearShared={()=>setSharedUrl(null)} />}
             {tab==='pantry' && <PantryTab data={data} update={update} isDesktop={isDesktop} />}
             {tab==='list' && <ShoppingTab data={data} update={update} isDesktop={isDesktop} />}
           </div>
