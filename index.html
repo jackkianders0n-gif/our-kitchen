@@ -74,8 +74,8 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // ======================== CONSTANTS ========================
-const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const DAY_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const DAYS = ['Sat','Sun','Mon','Tue','Wed','Thu','Fri'];
+const DAY_FULL = ['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'];
 const MEALS = ['Lunch','Dinner'];
 const CATEGORIES = ['Fruit & Veg','Meat & Fish','Dairy','Bakery','Frozen','Drinks','Cupboard','Household','Other'];
 const CAT_EMOJI = {'Fruit & Veg':'🥬','Meat & Fish':'🥩','Dairy':'🧀','Bakery':'🍞','Frozen':'🧊','Drinks':'☕','Cupboard':'🫙','Household':'🧹','Other':'📦'};
@@ -95,20 +95,22 @@ const CATEGORY_KEYWORDS = {
 
 // ======================== UTILITIES ========================
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-function getMonday(d) {
+function getWeekStart(d) {
   const date = d ? new Date(d) : new Date(); const day = date.getDay();
-  date.setDate(date.getDate() + ((day===0?-6:1)-day)); date.setHours(0,0,0,0); return date;
+  // Saturday = 6, so offset to get to the previous (or current) Saturday
+  const diff = (day + 1) % 7; // Sat=0, Sun=1, Mon=2, ...
+  date.setDate(date.getDate() - diff); date.setHours(0,0,0,0); return date;
 }
 const fmtDate = d => d.toISOString().split('T')[0];
 const parseDate = s => { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); };
 const addWeeks = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n*7); return r; };
 const daysBetween = (a,b) => Math.round((b-a)/86400000);
 const daysAgo = s => daysBetween(parseDate(s), new Date());
-function fmtWeek(mon) {
-  const sun=new Date(mon); sun.setDate(sun.getDate()+6);
-  return `${mon.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} – ${sun.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}`;
+function fmtWeek(start) {
+  const end=new Date(start); end.setDate(end.getDate()+6);
+  return `${start.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} – ${end.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}`;
 }
-const isThisWeek = mon => fmtDate(mon)===fmtDate(getMonday());
+const isThisWeek = start => fmtDate(start)===fmtDate(getWeekStart());
 function relDate(s) { const d=daysAgo(s); if(d===0) return 'Today'; if(d===1) return 'Yesterday'; if(d<7) return d+' days ago'; if(d<14) return 'Last week'; return Math.round(d/7)+' weeks ago'; }
 function calcRestock(purchases) {
   if(!purchases||purchases.length<2) return null;
@@ -458,8 +460,8 @@ function PlanTab({data, update, isDesktop}) {
   const [picker, setPicker] = useState(null);
   const [search, setSearch] = useState('');
 
-  const monday = useMemo(() => addWeeks(getMonday(), weekOffset), [weekOffset]);
-  const weekKey = fmtDate(monday);
+  const weekStart = useMemo(() => addWeeks(getWeekStart(), weekOffset), [weekOffset]);
+  const weekKey = fmtDate(weekStart);
   const plan = mealplans[weekKey] || {};
   const cells = plan.cells || {};
   const recipeMap = useMemo(() => { const m={}; recipes.forEach(r=>m[r.id]=r); return m; }, [recipes]);
@@ -486,7 +488,7 @@ function PlanTab({data, update, isDesktop}) {
         <div style={S.pageHead}><h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em'}}>Meal Plan</h1></div>
         <div style={S.weekNav}>
           <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w-1)}>{Icon.chevL}</button>
-          <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(monday)?'This Week':fmtWeek(monday)}</span>
+          <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(weekStart)?'This Week':fmtWeek(weekStart)}</span>
           <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
         </div>
 
@@ -548,7 +550,7 @@ function PlanTab({data, update, isDesktop}) {
       <div style={S.pageHead}><h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em'}}>Meal Plan</h1></div>
       <div style={S.weekNav}>
         <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w-1)}>{Icon.chevL}</button>
-        <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(monday)?'This Week':fmtWeek(monday)}</span>
+        <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(weekStart)?'This Week':fmtWeek(weekStart)}</span>
         <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
       </div>
 
