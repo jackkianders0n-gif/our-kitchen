@@ -66,8 +66,8 @@ textarea{resize:vertical;min-height:80px}
 const {useState,useEffect,useCallback,useMemo,useRef,createContext,useContext} = React;
 
 // ======================== CONFIG ========================
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL = 'https://wvedhcuebfdfkhfvphlb.supabase.co/rest/v1/';
+const SUPABASE_ANON_KEY = 'sb_publishable_bkeGnvruQEz3MsVDZiJ03g_bhXXDjgC';
 const APP_VERSION = '1.1.0';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: 'kitchen-auth' }
