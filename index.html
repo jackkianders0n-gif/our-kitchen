@@ -81,7 +81,6 @@ const MEALS = ['Lunch','Dinner'];
 const CATEGORIES = ['Fruit & Veg','Meat & Fish','Dairy','Bakery','Frozen','Drinks','Cupboard','Household','Other'];
 const CAT_EMOJI = {'Fruit & Veg':'🥬','Meat & Fish':'🥩','Dairy':'🧀','Bakery':'🍞','Frozen':'🧊','Drinks':'☕','Cupboard':'🫙','Household':'🧹','Other':'📦'};
 const CAT_COLORS = {'Fruit & Veg':'#6B9B6E','Meat & Fish':'#D4715E','Dairy':'#7BAFD4','Bakery':'#D4A96B','Frozen':'#7BC4D4','Drinks':'#9B7BD4','Cupboard':'#D49B6B','Household':'#D47BA4','Other':'#A0958B'};
-const SPECIAL_MEALS = { OUT: '🍽️ Out for dinner', SKIP: null };
 // A plan cell holds a recipe id, '__OUT__', or {note:'…'} for a meal with no recipe
 const cellNote = v => (v && typeof v === 'object' && v.note) ? v.note : null;
 
@@ -571,6 +570,67 @@ function AuthScreen({onLogin}) {
   );
 }
 
+// ======================== SUGGESTIONS ========================
+const cellRecipeId = v => typeof v === 'string' && v !== '__OUT__' ? v : null;
+const cellLeftover = v => (v && typeof v === 'object' && v.leftover) ? v.leftover : null;
+const dayDate = (weekKey, day) => { const d = parseDate(weekKey); d.setDate(d.getDate() + DAYS.indexOf(day)); return d; };
+
+// Every time each recipe has been on the plan: { recipeId: [{wk, day, meal, date}] }
+function planHistory(mealplans) {
+  const h = {};
+  for (const [wk, p] of Object.entries(mealplans || {})) {
+    for (const [key, v] of Object.entries(p?.cells || {})) {
+      const id = cellRecipeId(v); if (!id) continue;
+      const [day, meal] = key.split('-');
+      if (!DAYS.includes(day)) continue;
+      (h[id] = h[id] || []).push({ wk, day, meal, date: dayDate(wk, day) });
+    }
+  }
+  return h;
+}
+
+// Rank recipes for one slot: favour ones you haven't had for a while, rate highly, usually
+// have at this meal, and that differ from the meals either side. Returns [{recipe, score, why}].
+function suggestFor({ recipes, history, weekKey, day, meal, cells, exclude = [], jitter = 0 }) {
+  const target = dayDate(weekKey, day), di = DAYS.indexOf(day), thisKey = `${day}-${meal}`;
+  const byId = {}; recipes.forEach(r => byId[r.id] = r);
+  const inWeek = new Set(Object.entries(cells).filter(([k]) => k !== thisKey).map(([, v]) => cellRecipeId(v)).filter(Boolean));
+  const nearCats = [];
+  [DAYS[di-1], day, DAYS[di+1]].forEach(d => d && MEALS.forEach(m => {
+    if (`${d}-${m}` === thisKey) return;
+    const r = byId[cellRecipeId(cells[`${d}-${m}`])]; if (r && r.category && r.category !== 'Other') nearCats.push(r.category);
+  }));
+  return recipes.filter(r => !exclude.includes(r.id) && !inWeek.has(r.id)).map(r => {
+    const occ = (history[r.id] || []).filter(o => !(o.wk === weekKey && o.day === day && o.meal === meal));
+    const dates = occ.map(o => o.date);
+    if (r.lastCooked) dates.push(parseDate(r.lastCooked));
+    let gap = Infinity;
+    dates.forEach(d => { gap = Math.min(gap, Math.abs(daysBetween(d, target))); });
+    const rating = r.rating || 0, atMeal = occ.filter(o => o.meal === meal).length, atOther = occ.length - atMeal;
+    let score = 0; const why = [];
+    if (gap === Infinity) { score += 30; why.push('Not had yet'); }
+    else {
+      score += Math.min(gap, 60) / 60 * 40;
+      if (gap >= 14) why.push(`Not had for ${gap >= 60 ? Math.round(gap/30.4) + ' months' : Math.round(gap/7) + ' weeks'}`);
+      else if (gap < 7) why.push('Had recently');
+    }
+    if (rating) { score += (rating - 3) * 12; if (rating >= 4) why.unshift('★'.repeat(rating)); }
+    if (atMeal) score += 8; else if (atOther >= 2) score -= 10;
+    if (occ.length >= 4) why.push('A regular');
+    score += Math.min(occ.length, 8);
+    score -= nearCats.filter(c => c === r.category).length * 6;
+    score += Math.random() * jitter;
+    return { recipe: r, score, why: why.slice(0, 2).join(' · ') };
+  }).sort((a, b) => b.score - a.score);
+}
+function weightedPick(list) {
+  if (!list.length) return null;
+  const max = list[0].score, w = list.map(s => Math.exp((s.score - max) / 10)), total = w.reduce((a, b) => a + b, 0);
+  let x = Math.random() * total;
+  for (let i = 0; i < list.length; i++) { x -= w[i]; if (x <= 0) return list[i]; }
+  return list[list.length - 1];
+}
+
 // ======================== PLAN TAB ========================
 function PlanTab({data, update, isDesktop, cook}) {
   const {recipes, mealplans} = data;
@@ -582,6 +642,8 @@ function PlanTab({data, update, isDesktop, cook}) {
   const [mealPrepDays, setMealPrepDays] = useState({});
   const [mealPrepSearch, setMealPrepSearch] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [surprise, setSurprise] = useState(null); // {id, why, seen:[]}
+  const [undo, setUndo] = useState(null); // {weekKey, filled:{key:id}, prevPlanned:{id:lastPlanned}}
 
   const weekStart = useMemo(() => addWeeks(getWeekStart(), weekOffset), [weekOffset]);
   const weekKey = fmtDate(weekStart);
@@ -589,6 +651,17 @@ function PlanTab({data, update, isDesktop, cook}) {
   const cells = plan.cells || {};
   const mealPrep = plan.mealPrep || null; // {recipeId, days: ['Mon','Wed','Fri']}
   const recipeMap = useMemo(() => { const m={}; recipes.forEach(r=>m[r.id]=r); return m; }, [recipes]);
+  const history = useMemo(() => planHistory(mealplans), [mealplans]);
+  useEffect(() => { setUndo(null); }, [weekOffset]);
+  useEffect(() => { if (!undo) return; const t = setTimeout(() => setUndo(null), 15000); return () => clearTimeout(t); }, [undo]);
+
+  // Change this week's cells from the latest data (not this render's copy), so edits
+  // arriving from the other phone at the same moment aren't overwritten.
+  function setWeek(fn) {
+    update('mealplans', mp => { const p = mp[weekKey] || {}; return { ...mp, [weekKey]: { ...fn(p), updatedAt: new Date().toISOString() } }; });
+  }
+  const setCells = fn => setWeek(p => ({ ...p, cells: fn(p.cells || {}) }));
+  const markPlanned = ids => update('recipes', rs => rs.map(r => ids.includes(r.id) ? { ...r, lastPlanned: weekKey } : r));
 
   // Get meal prep history (last 12 weeks, excluding current)
   const mealPrepHistory = useMemo(() => {
@@ -614,18 +687,13 @@ function PlanTab({data, update, isDesktop, cook}) {
   function assign(val) {
     if(!picker) return;
     const key = `${picker.day}-${picker.meal}`;
-    const newCells = {...cells};
-    if(val) newCells[key] = val; else delete newCells[key];
-    const newPlans = {...mealplans, [weekKey]: {...(mealplans[weekKey]||{}), cells:newCells, updatedAt:new Date().toISOString()}};
-    update('mealplans', newPlans);
-    if(typeof val === 'string' && val !== '__OUT__') {
-      update('recipes', rs => rs.map(r => r.id===val ? {...r, lastPlanned:weekKey} : r));
-    }
-    setPicker(null); setSearch('');
+    setCells(c => { const n = {...c}; if(val) n[key] = val; else delete n[key]; return n; });
+    if(cellRecipeId(val)) markPlanned([val]);
+    setPicker(null); setSearch(''); setSurprise(null);
   }
 
   function openPicker(day, meal) {
-    setPicker({day, meal});
+    setPicker({day, meal}); setSurprise(null);
     setSearch(cellNote(cells[`${day}-${meal}`]) || '');
   }
 
@@ -655,16 +723,12 @@ function PlanTab({data, update, isDesktop, cook}) {
     if (!mealPrepRecipe) return;
     const selectedDays = DAYS.filter(d => mealPrepDays[d]);
     if (selectedDays.length === 0) return;
-    const newCells = {...cells};
-    selectedDays.forEach(day => { newCells[`${day}-Lunch`] = mealPrepRecipe; });
-    const newPlans = {...mealplans, [weekKey]: {
-      ...(mealplans[weekKey]||{}),
-      cells: newCells,
-      mealPrep: { recipeId: mealPrepRecipe, days: selectedDays },
-      updatedAt: new Date().toISOString()
-    }};
-    update('mealplans', newPlans);
-    update('recipes', rs => rs.map(r => r.id===mealPrepRecipe ? {...r, lastPlanned:weekKey} : r));
+    setWeek(p => {
+      const n = {...(p.cells||{})};
+      selectedDays.forEach(day => { n[`${day}-Lunch`] = mealPrepRecipe; });
+      return {...p, cells: n, mealPrep: { recipeId: mealPrepRecipe, days: selectedDays }};
+    });
+    markPlanned([mealPrepRecipe]);
     setMealPrepOverlay(null); setMealPrepRecipe(null); setMealPrepDays({});
   }
 
@@ -678,11 +742,63 @@ function PlanTab({data, update, isDesktop, cook}) {
 
   function clearMealPrep() {
     if (!mealPrep) return;
-    const newCells = {...cells};
-    (mealPrep.days||[]).forEach(day => { if(newCells[`${day}-Lunch`] === mealPrep.recipeId) delete newCells[`${day}-Lunch`]; });
-    const newPlan = {...(mealplans[weekKey]||{}), cells:newCells, updatedAt:new Date().toISOString()};
-    delete newPlan.mealPrep;
-    update('mealplans', {...mealplans, [weekKey]: newPlan});
+    setWeek(p => {
+      const n = {...(p.cells||{})};
+      (mealPrep.days||[]).forEach(day => { if(n[`${day}-Lunch`] === mealPrep.recipeId) delete n[`${day}-Lunch`]; });
+      const np = {...p, cells: n}; delete np.mealPrep; return np;
+    });
+  }
+
+  // ---- Help choosing
+  const todayIdx = weekOffset === 0 ? (new Date().getDay() + 1) % 7 : weekOffset < 0 ? 7 : 0;
+  const emptyDinners = DAYS.filter((d, i) => i >= todayIdx && !cells[`${d}-Dinner`]);
+  function fillDinners() {
+    const working = {...cells}, filled = {}, picked = [];
+    emptyDinners.forEach(day => {
+      const [top] = suggestFor({ recipes, history, weekKey, day, meal:'Dinner', cells: working, exclude: picked, jitter: 10 });
+      if (!top) return;
+      working[`${day}-Dinner`] = filled[`${day}-Dinner`] = top.recipe.id; picked.push(top.recipe.id);
+    });
+    if (!picked.length) return;
+    const prevPlanned = {}; picked.forEach(id => prevPlanned[id] = recipeMap[id]?.lastPlanned || null);
+    setCells(c => { const n = {...c}; Object.entries(filled).forEach(([k, id]) => { if (!n[k]) n[k] = id; }); return n; });
+    markPlanned(picked);
+    setUndo({ weekKey, filled, prevPlanned });
+  }
+  function undoFill() {
+    if (!undo || undo.weekKey !== weekKey) return;
+    setCells(c => { const n = {...c}; Object.entries(undo.filled).forEach(([k, id]) => { if (n[k] === id) delete n[k]; }); return n; });
+    update('recipes', rs => rs.map(r => { if (!(r.id in undo.prevPlanned)) return r; const n = {...r}; if (undo.prevPlanned[r.id]) n.lastPlanned = undo.prevPlanned[r.id]; else delete n.lastPlanned; return n; }));
+    setUndo(null);
+  }
+  function surpriseMe(list) {
+    const top = list.slice(0, 10), seen = surprise?.seen || [];
+    let pool = top.filter(s => !seen.includes(s.recipe.id) && s.recipe.id !== surprise?.id);
+    if (!pool.length) pool = top.filter(s => s.recipe.id !== surprise?.id);
+    const p = weightedPick(pool);
+    if (p) setSurprise({ id: p.recipe.id, why: p.why, seen: pool.length > 1 ? [...seen, p.recipe.id] : [p.recipe.id] });
+  }
+  // Yesterday's dinner, offered as leftovers for lunch
+  function prevDinner(day) {
+    const i = DAYS.indexOf(day);
+    const v = i > 0 ? cells[`${DAYS[i-1]}-Dinner`] : mealplans[fmtDate(addWeeks(weekStart, -1))]?.cells?.['Fri-Dinner'];
+    const id = cellRecipeId(v);
+    if (id && recipeMap[id]) return { label: recipeMap[id].name, value: { leftover: id } };
+    const note = cellNote(v);
+    if (note && !/^leftover/i.test(note)) return { label: note, value: { note: 'Leftover ' + note } };
+    return null;
+  }
+
+  function PlanActions() {
+    if (weekOffset < 0) return null;
+    const showFill = emptyDinners.length > 0 && recipes.length > 1, showUndo = undo && undo.weekKey === weekKey;
+    if (!showFill && !showUndo) return null;
+    return (<div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:16}}>
+      {showFill && <Btn secondary sm onClick={fillDinners}>✨ Fill {emptyDinners.length} empty dinner{emptyDinners.length>1?'s':''}</Btn>}
+      {showUndo && <div style={{...S.badge,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text)',padding:'4px 4px 4px 10px',gap:8,fontWeight:500}}>
+        Filled {Object.keys(undo.filled).length} — tap any to change
+        <button style={{...chipBtn,fontSize:'.78rem'}} onClick={undoFill}>Undo</button></div>}
+    </div>);
   }
 
   const filtered = recipes.filter(r => r.name?.toLowerCase().includes(search.toLowerCase()));
@@ -766,30 +882,18 @@ function PlanTab({data, update, isDesktop, cook}) {
     const current = cells[`${picker.day}-${picker.meal}`];
     const currentRecipe = typeof current === 'string' ? recipeMap[current] : null;
     const exactMatch = filtered.some(r => r.name?.trim().toLowerCase() === search.trim().toLowerCase());
+    const sugg = search ? [] : suggestFor({ recipes, history, weekKey, day: picker.day, meal: picker.meal, cells });
+    const leftover = isLunch && !search ? prevDinner(picker.day) : null;
     return (<div>
       {currentRecipe && <div style={{...S.card,display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
         <CatDot cat={currentRecipe.category} />
         <div style={{flex:1,minWidth:0,...S.itemName}}>{currentRecipe.name}</div>
         <Btn primary sm onClick={()=>{setPicker(null);setSearch('');cook(currentRecipe.id)}}>👩‍🍳 Cook</Btn>
       </div>}
-      {cells[`${picker.day}-${picker.meal}`] && <Btn danger sm onClick={()=>assign(null)} style={{marginBottom:14}}>Clear</Btn>}
-      <Btn secondary sm onClick={()=>assign('__OUT__')} style={{marginBottom:14,marginLeft:cells[`${picker.day}-${picker.meal}`]?8:0}}>🍽️ Out for dinner</Btn>
-
-      {/* Recent meal preps shown at top of lunch picker */}
-      {isLunch && recentMealPrepRecipes.length > 0 && !search && (
-        <div style={{marginBottom:14}}>
-          <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6}}>🥡 Recent meal preps</div>
-          {recentMealPrepRecipes.map(h => (
-            <div key={h.recipeId} style={{...S.itemRow,cursor:'pointer',padding:'8px 0'}} onClick={()=>assign(h.recipeId)}>
-              <CatDot cat={h.category} />
-              <div style={{flex:1,minWidth:0}}>
-                <div style={S.itemName}>{h.recipeName}</div>
-              </div>
-            </div>
-          ))}
-          <div style={{borderBottom:'1px solid var(--border)',margin:'6px 0'}} />
-        </div>
-      )}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}}>
+        {current && <Btn danger sm onClick={()=>assign(null)}>Clear</Btn>}
+        <Btn secondary sm onClick={()=>assign('__OUT__')}>🍽️ Eating out</Btn>
+      </div>
 
       <div style={{position:'relative',marginBottom:14}}>
         <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
@@ -805,13 +909,65 @@ function PlanTab({data, update, isDesktop, cook}) {
           </div>
         </div>
       )}
+
+      {!search && <>
+        {leftover && (
+          <div style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(leftover.value)}>
+            <span style={{fontSize:'1.1rem'}}>🍱</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={S.itemName}>Leftovers: {leftover.label}</div>
+              <div style={S.itemMeta}>From the night before</div>
+            </div>
+          </div>
+        )}
+        {sugg.length > 1 && (<div style={{marginBottom:6}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',margin:'14px 0 2px'}}>
+            <div style={{...S.sectionTitle,margin:0}}>✨ Suggestions</div>
+            <button style={{...chipBtn,fontSize:'.8rem',padding:'6px 12px'}} onClick={()=>surpriseMe(sugg)}>🎲 Surprise me</button>
+          </div>
+          {surprise && recipeMap[surprise.id] && (
+            <div style={{...S.card,marginTop:10,background:'var(--accent-bg)',borderColor:'transparent',textAlign:'center',padding:'16px'}}>
+              <div style={{fontSize:'.78rem',color:'var(--text-muted)'}}>How about…</div>
+              <div style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'1.2rem',margin:'4px 0'}}>{recipeMap[surprise.id].name}</div>
+              {surprise.why && <div style={S.itemMeta}>{surprise.why}</div>}
+              <div style={{display:'flex',gap:8,justifyContent:'center',marginTop:12}}>
+                <Btn primary sm onClick={()=>assign(surprise.id)}>Yes, plan it</Btn>
+                <Btn secondary sm onClick={()=>surpriseMe(sugg)}>Another</Btn>
+              </div>
+            </div>
+          )}
+          {sugg.slice(0,3).map(sg => (
+            <div key={sg.recipe.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(sg.recipe.id)}>
+              <CatDot cat={sg.recipe.category} />
+              <div style={{flex:1,minWidth:0}}>
+                <div style={S.itemName}>{sg.recipe.name}</div>
+                {sg.why && <div style={S.itemMeta}>{sg.why}</div>}
+              </div>
+            </div>
+          ))}
+        </div>)}
+
+        {isLunch && recentMealPrepRecipes.length > 0 && (
+          <div>
+            <div style={S.sectionTitle}>🥡 Recent meal preps</div>
+            {recentMealPrepRecipes.map(h => (
+              <div key={h.recipeId} style={{...S.itemRow,cursor:'pointer',padding:'8px 0'}} onClick={()=>assign(h.recipeId)}>
+                <CatDot cat={h.category} />
+                <div style={{flex:1,minWidth:0}}><div style={S.itemName}>{h.recipeName}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+        {recipes.length > 0 && <div style={S.sectionTitle}>All recipes</div>}
+      </>}
+
       {filtered.length===0 ? (!search.trim() && <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes yet. Type a meal above, or add recipes in the Recipes tab.</p>)
-      : filtered.map(r => (
+      : [...filtered].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(r => (
         <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(r.id)}>
           <CatDot cat={r.category} />
           <div style={{flex:1,minWidth:0}}>
             <div style={S.itemName}>{r.name}</div>
-            {r.lastPlanned && <div style={S.itemMeta}>Last planned {relDate(r.lastPlanned)}</div>}
+            {(r.rating>0 || r.lastPlanned) && <div style={S.itemMeta}>{r.rating>0 && <span style={{color:'#E0A030'}}>{'★'.repeat(r.rating)}</span>}{r.rating>0 && r.lastPlanned && ' · '}{r.lastPlanned && <>Last planned {relDate(r.lastPlanned)}</>}</div>}
           </div>
         </div>
       ))}
@@ -889,6 +1045,7 @@ function PlanTab({data, update, isDesktop, cook}) {
           <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
         </div>
         {TodayCard()}
+        {PlanActions()}
 
         <div style={S.planTable}>
           <div style={S.planHeader}></div>
@@ -900,8 +1057,9 @@ function PlanTab({data, update, isDesktop, cook}) {
                 const key = `${day}-${meal}`;
                 const val = cells[key];
                 const isOut = val === '__OUT__';
-                const note = cellNote(val);
-                const recipe = !isOut && !note && val ? recipeMap[val] : null;
+                const lo = cellLeftover(val);
+                const note = cellNote(val) || (lo ? '🍱 ' + (recipeMap[lo]?.name || 'Leftovers') : null);
+                const recipe = cellRecipeId(val) ? recipeMap[val] : null;
                 return (
                   <div key={key} style={{...S.planTableCell}} onClick={()=>openPicker(day,meal)}
                     onMouseEnter={e=>e.currentTarget.style.background='var(--accent-bg)'}
@@ -939,6 +1097,7 @@ function PlanTab({data, update, isDesktop, cook}) {
         <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
       </div>
       {TodayCard()}
+      {PlanActions()}
 
       {DAYS.map((day,di) => (
         <div key={day} style={{marginBottom:12}}>
@@ -948,8 +1107,9 @@ function PlanTab({data, update, isDesktop, cook}) {
               const key = `${day}-${meal}`;
               const val = cells[key];
               const isOut = val === '__OUT__';
-              const note = cellNote(val);
-              const recipe = !isOut && !note && val ? recipeMap[val] : null;
+              const lo = cellLeftover(val);
+              const note = cellNote(val) || (lo ? '🍱 ' + (recipeMap[lo]?.name || 'Leftovers') : null);
+              const recipe = cellRecipeId(val) ? recipeMap[val] : null;
               return (
                 <div key={meal} style={S.mealCell} onClick={()=>openPicker(day,meal)}>
                   <div style={{fontSize:'.68rem',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text-muted)',marginBottom:3}}>{meal}</div>
