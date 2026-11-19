@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Our Kitchen</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#D4715E">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Lora:ital,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&display=swap">
+<style>
+:root {
+  --bg: #FFF9F5; --surface: #FFFFFF; --text: #2C1E10; --text-muted: #8C7B6E;
+  --accent: #D4715E; --accent-hover: #C0634F; --accent-bg: #FFF0EA; --accent-text: #FFF;
+  --border: #EDE4DB; --warning: #B45309; --warning-bg: #FEF3C7;
+  --danger: #C53030; --danger-bg: #FED7D7; --success: #6B9B6E; --success-bg: #E8F2E8;
+  --overlay: rgba(44,30,16,0.35);
+  --sidebar-w: 200px; --content-max: 960px;
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg: #1A1512; --surface: #262019; --text: #F0E8E0; --text-muted: #A09488;
+  --accent: #E8876E; --accent-hover: #D57A62; --accent-bg: #2D1F18; --accent-text: #FFF;
+  --border: #3A302A; --warning: #FBBF24; --warning-bg: #332D14;
+  --danger: #FC8181; --danger-bg: #3B1A1A; --success: #68D391; --success-bg: #1A2E1A;
+  --overlay: rgba(0,0,0,0.55); color-scheme: dark;
+}}
+:root[data-theme="dark"]{
+  --bg: #1A1512; --surface: #262019; --text: #F0E8E0; --text-muted: #A09488;
+  --accent: #E8876E; --accent-hover: #D57A62; --accent-bg: #2D1F18; --accent-text: #FFF;
+  --border: #3A302A; --warning: #FBBF24; --warning-bg: #332D14;
+  --danger: #FC8181; --danger-bg: #3B1A1A; --success: #68D391; --success-bg: #1A2E1A;
+  --overlay: rgba(0,0,0,0.55); color-scheme: dark;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',system-ui,sans-serif;
+  padding:0 max(16px,env(safe-area-inset-left,0px)) 0 max(16px,env(safe-area-inset-right,0px));
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:'Lora',Georgia,serif;font-weight:600;text-wrap:balance}
+input,textarea,select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface);color:var(--text);font-family:'DM Sans',system-ui,sans-serif;font-size:.9rem;outline:none;transition:border-color .15s}
+input:focus,textarea:focus,select:focus{border-color:var(--accent)}
+textarea{resize:vertical;min-height:80px}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{transform:translateY(50px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* Desktop overlay: centred modal instead of bottom sheet */
+@media(min-width:768px){
+  .overlay-panel{border-radius:16px!important;max-height:80vh!important;animation:slideIn .2s ease!important;margin-bottom:0!important}
+  .overlay-backdrop{align-items:center!important}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+
+<script type="text/babel">
+const {useState,useEffect,useCallback,useMemo,useRef,createContext,useContext} = React;
+
+// ======================== CONFIG ========================
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const APP_VERSION = '1.1.0';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ======================== CONSTANTS ========================
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const DAY_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const MEALS = ['Lunch','Dinner'];
+const CATEGORIES = ['Fruit & Veg','Meat & Fish','Dairy','Bakery','Frozen','Drinks','Cupboard','Household','Other'];
+const CAT_EMOJI = {'Fruit & Veg':'🥬','Meat & Fish':'🥩','Dairy':'🧀','Bakery':'🍞','Frozen':'🧊','Drinks':'☕','Cupboard':'🫙','Household':'🧹','Other':'📦'};
+const CAT_COLORS = {'Fruit & Veg':'#6B9B6E','Meat & Fish':'#D4715E','Dairy':'#7BAFD4','Bakery':'#D4A96B','Frozen':'#7BC4D4','Drinks':'#9B7BD4','Cupboard':'#D49B6B','Household':'#D47BA4','Other':'#A0958B'};
+const SPECIAL_MEALS = { OUT: '🍽️ Out for dinner', SKIP: null };
+
+const CATEGORY_KEYWORDS = {
+  'Fruit & Veg': ['apple','banana','orange','lemon','lime','grape','strawberr','blueberr','raspberr','mango','pear','peach','melon','avocado','tomato','potato','onion','garlic','carrot','broccoli','spinach','lettuce','cucumber','pepper','courgette','aubergine','mushroom','celery','leek','cabbage','kale','sweetcorn','corn on','pea','bean','lentil','salad','herb','basil','coriander','parsley','mint','ginger','chilli','fruit','veg','vegetable','spring onion','sweet potato','butternut','beetroot','radish','asparagus','tenderstem','rocket','watercress','pak choi'],
+  'Meat & Fish': ['chicken','beef','pork','lamb','mince','steak','sausage','bacon','ham','turkey','duck','salmon','tuna','cod','prawn','shrimp','fish','fillet','breast','thigh','wing','rib','gammon','chorizo','pepperoni','salami','mackerel','haddock','sea bass','crab','lobster','anchov'],
+  'Dairy': ['milk','cheese','butter','yogurt','yoghurt','cream','creme fraiche','egg','margarine','spread','cheddar','mozzarella','parmesan','brie','camembert','gouda','feta','halloumi','mascarpone','ricotta','quark','skyr','fromage'],
+  'Bakery': ['bread','roll','baguette','croissant','muffin','cake','pastry','scone','wrap','pitta','naan','bagel','brioche','sourdough','crumpet','pancake','waffle','tortilla','ciabatta','focaccia','hot cross'],
+  'Frozen': ['frozen','ice cream','pizza','fish finger','nugget','lolly','sorbet','gelato','frozen veg','frozen fruit','potato waffle','garlic bread'],
+  'Drinks': ['water','juice','squash','cola','coke','pepsi','lemonade','tonic','beer','wine','spirit','coffee','tea bag','oat milk','almond milk','soy milk','coconut milk','smoothie','kombucha','prosecco','gin','vodka','rum','whisky','cider','ale','lager','sparkling','fizzy','cordial'],
+  'Cupboard': ['pasta','rice','noodle','cereal','oat','porridge','sugar','salt','pepper','oil','vinegar','sauce','ketchup','mustard','mayo','mayonnaise','stock','gravy','spice','cumin','paprika','turmeric','cinnamon','tin','can','soup','baked bean','chopped tomato','coconut','nut','seed','honey','jam','marmalade','peanut butter','chocolate','biscuit','crisp','snack','cracker','flour','couscous','quinoa','soy sauce','worcester','tabasco','sriracha','chutney','pickle','olive','caper','passata','pesto','curry paste','dried'],
+  'Household': ['soap','detergent','washing','fabric','bleach','cleaner','sponge','cloth','bin bag','kitchen roll','toilet roll','tissue','foil','cling film','bag','battery','candle','air freshener','dishwash','rinse aid','hand wash','shower','shampoo','conditioner','toothpaste','deodorant','razor'],
+};
+
+// ======================== UTILITIES ========================
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+function getMonday(d) {
+  const date = d ? new Date(d) : new Date(); const day = date.getDay();
+  date.setDate(date.getDate() + ((day===0?-6:1)-day)); date.setHours(0,0,0,0); return date;
+}
+const fmtDate = d => d.toISOString().split('T')[0];
+const parseDate = s => { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); };
+const addWeeks = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n*7); return r; };
+const daysBetween = (a,b) => Math.round((b-a)/86400000);
+const daysAgo = s => daysBetween(parseDate(s), new Date());
+function fmtWeek(mon) {
+  const sun=new Date(mon); sun.setDate(sun.getDate()+6);
+  return `${mon.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} – ${sun.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}`;
+}
+const isThisWeek = mon => fmtDate(mon)===fmtDate(getMonday());
+function relDate(s) { const d=daysAgo(s); if(d===0) return 'Today'; if(d===1) return 'Yesterday'; if(d<7) return d+' days ago'; if(d<14) return 'Last week'; return Math.round(d/7)+' weeks ago'; }
+function calcRestock(purchases) {
+  if(!purchases||purchases.length<2) return null;
+  const sorted=[...purchases].sort(); let total=0;
+  for(let i=1;i<sorted.length;i++) total+=daysBetween(parseDate(sorted[i-1]),parseDate(sorted[i]));
+  const avg=Math.round(total/(sorted.length-1)); const since=daysAgo(sorted[sorted.length-1]);
+  return { avgDays:avg, daysSince:since, overdue:since-avg, isOverdue:since>avg };
+}
+
+function guessCategory(name) {
+  const lower = name.toLowerCase();
+  for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (keywords.some(kw => lower.includes(kw))) return cat;
+  }
+  return 'Other';
+}
+
+function parseReceipt(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const items = [];
+  const priceRe = /£-?\d+\.\d{2}/;
+
+  // Skip patterns
+  const skipRe = /^(subtotal|total|delivery|saving|clubcard|nectar|item[s]?\b|product[s]?\b|qty\b|quantity|price|description|your order|order summary|substitut|payment|paid|card ending|visa|mastercard|amex|slot|basket|multibuy|offer|discount|refund|carrier bag|bag charge|minimum|estimated|original|price match|you saved|reward|point|receipt|order ref|order number|invoice|vat|thank you|great choice|next delivery|helpful|rate your|how was|customer ref|driver|packed by|this order|standard delivery|free delivery|pick.?up|collect|click.?collect)/i;
+  const dateRe = /^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}/;
+  const sepRe = /^[=\-_*~·•—–]+$/;
+
+  for (const line of lines) {
+    if (skipRe.test(line)) continue;
+    if (dateRe.test(line)) continue;
+    if (sepRe.test(line)) continue;
+    if (line.length < 3) continue;
+
+    // Must have a price to be a credible item line
+    if (!priceRe.test(line)) continue;
+
+    let name = line;
+    // Strip all prices
+    name = name.replace(/£-?\d+\.\d{2}/g, '');
+    // Strip quantity patterns
+    name = name.replace(/\b(?:qty|quantity)\s*:?\s*\d+/gi, '');
+    name = name.replace(/\s+x\s*\d+\s*$/i, '');
+    name = name.replace(/^\d+\s*x\s+/i, '');
+    // Strip store brand prefixes
+    name = name.replace(/^(?:Sainsbury'?s?|by Sainsbury'?s?|Taste the Difference|TTD|SO Organic|Stamford Street Co\.?|Hubbard'?s?|Ocado|Ocado Life|Ocado Own|Go Cook|Good Natured)\s+/i, '');
+    // Strip leading/trailing punctuation and whitespace
+    name = name.replace(/^[,.\-–—:;|]+|[,.\-–—:;|]+$/g, '').trim();
+    // Collapse multiple spaces
+    name = name.replace(/\s{2,}/g, ' ');
+
+    if (name.length >= 2 && !/^\d+$/.test(name)) {
+      items.push({ name, category: guessCategory(name), selected: true });
+    }
+  }
+
+  // Deduplicate by name (case-insensitive)
+  const seen = new Set();
+  return items.filter(i => {
+    const key = i.name.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() => { try { return window.matchMedia(query).matches; } catch(e) { return false; } });
+  useEffect(() => {
+    try {
+      const mq = window.matchMedia(query);
+      const handler = e => setMatches(e.matches);
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
+    } catch(e) {}
+  }, [query]);
+  return matches;
+}
+
+// ======================== STYLES ========================
+const S = {
+  tabBar: { position:'fixed',bottom:0,left:0,right:0,background:'var(--surface)',borderTop:'1px solid var(--border)',display:'flex',zIndex:50,
+    paddingBottom:'env(safe-area-inset-bottom,0px)',paddingLeft:'max(16px,env(safe-area-inset-left,0px))',paddingRight:'max(16px,env(safe-area-inset-right,0px))' },
+  tabBarDesktop: { position:'static',flexDirection:'column',width:'var(--sidebar-w)',minWidth:'var(--sidebar-w)',borderTop:'none',borderRight:'1px solid var(--border)',
+    padding:'12px 0',gap:2,background:'var(--surface)',height:'100%',overflow:'auto' },
+  tabBtn: { flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:2,padding:'8px 4px 6px',background:'none',border:'none',cursor:'pointer',
+    color:'var(--text-muted)',fontSize:'.65rem',fontFamily:'DM Sans,system-ui',fontWeight:500,letterSpacing:'.02em',textTransform:'uppercase',transition:'color .15s' },
+  tabBtnDesktop: { flex:'none',flexDirection:'row',justifyContent:'flex-start',gap:10,padding:'10px 20px',fontSize:'.8rem',borderRadius:0,letterSpacing:'.01em' },
+  tabActive: { color:'var(--accent)' },
+  tabActiveDesktop: { color:'var(--accent)',background:'var(--accent-bg)' },
+  content: { flex:1,overflowY:'auto',minHeight:0,paddingBottom:'calc(68px + env(safe-area-inset-bottom,0px))',paddingTop:8,WebkitOverflowScrolling:'touch' },
+  contentDesktop: { paddingBottom:24,paddingTop:16,paddingLeft:32,paddingRight:32 },
+  pageHead: { display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16 },
+  card: { background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',padding:'14px 16px',marginBottom:10 },
+  btn: { display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px 18px',borderRadius:10,border:'none',cursor:'pointer',
+    fontFamily:'DM Sans,system-ui',fontSize:'.875rem',fontWeight:600,transition:'background .15s,opacity .15s',whiteSpace:'nowrap' },
+  btnPrimary: { background:'var(--accent)',color:'var(--accent-text)' },
+  btnSecondary: { background:'var(--accent-bg)',color:'var(--accent)' },
+  btnDanger: { background:'var(--danger-bg)',color:'var(--danger)' },
+  btnSm: { padding:'6px 12px',fontSize:'.8rem' },
+  btnGhost: { background:'none',color:'var(--text-muted)',border:'none',cursor:'pointer',padding:'6px 10px',fontFamily:'DM Sans,system-ui',fontSize:'.85rem',fontWeight:500 },
+  overlayBackdrop: { position:'fixed',inset:0,background:'var(--overlay)',zIndex:100,display:'flex',alignItems:'flex-end',justifyContent:'center',animation:'fadeIn .15s ease' },
+  overlayPanel: { background:'var(--surface)',borderRadius:'16px 16px 0 0',width:'100%',maxWidth:520,maxHeight:'88vh',overflowY:'auto',
+    padding:20,paddingBottom:'calc(20px + env(safe-area-inset-bottom,0px))',animation:'slideUp .2s ease' },
+  overlayHead: { display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:18 },
+  overlayClose: { width:32,height:32,borderRadius:'50%',border:'none',cursor:'pointer',background:'var(--border)',color:'var(--text-muted)',fontSize:'1.1rem',
+    display:'flex',alignItems:'center',justifyContent:'center' },
+  badge: { display:'inline-flex',alignItems:'center',gap:4,padding:'3px 8px',borderRadius:20,fontSize:'.72rem',fontWeight:600,letterSpacing:'.02em' },
+  field: { marginBottom:14 },
+  label: { display:'block',fontSize:'.78rem',fontWeight:600,color:'var(--text-muted)',marginBottom:4,letterSpacing:'.03em' },
+  fieldRow: { display:'flex',gap:10 },
+  sectionTitle: { fontSize:'.75rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',margin:'18px 0 8px' },
+  weekNav: { display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:16 },
+  weekBtn: { background:'var(--accent-bg)',color:'var(--accent)',border:'none',cursor:'pointer',width:34,height:34,borderRadius:'50%',fontSize:'1rem',
+    display:'flex',alignItems:'center',justifyContent:'center' },
+  dayName: { fontWeight:700,fontSize:'.78rem',textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6 },
+  mealCell: { flex:1,minWidth:0,padding:'10px 12px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,cursor:'pointer',transition:'border-color .15s' },
+  mealCellHover: { borderColor:'var(--accent)' },
+  itemRow: { display:'flex',alignItems:'center',gap:12,padding:'12px 0',borderBottom:'1px solid var(--border)' },
+  itemName: { fontWeight:500,fontSize:'.9rem' },
+  itemMeta: { fontSize:'.78rem',color:'var(--text-muted)',marginTop:2 },
+  checkRow: { display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:'1px solid var(--border)' },
+  checkbox: { width:22,height:22,borderRadius:6,border:'2px solid var(--border)',flexShrink:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',
+    transition:'all .15s',background:'none' },
+  checkboxOn: { background:'var(--accent)',borderColor:'var(--accent)',color:'var(--accent-text)' },
+  empty: { textAlign:'center',padding:'48px 16px',color:'var(--text-muted)' },
+  emptyIcon: { fontSize:'2.5rem',marginBottom:12,opacity:.4 },
+  ingRow: { display:'flex',gap:6,alignItems:'center',marginBottom:6 },
+  removeBtn: { width:28,height:28,borderRadius:'50%',border:'none',background:'var(--danger-bg)',color:'var(--danger)',cursor:'pointer',fontSize:'1rem',flexShrink:0,
+    display:'flex',alignItems:'center',justifyContent:'center' },
+  syncDot: { width:8,height:8,borderRadius:'50%',flexShrink:0 },
+  header: { display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0 8px',
+    paddingTop:'max(12px, env(safe-area-inset-top, 0px))' },
+  headerDesktop: { paddingLeft:20,paddingRight:20 },
+  authContainer: { display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'100vh',padding:'20px 16px' },
+  // Desktop grid for cards
+  cardGrid: { display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:10 },
+  // Desktop plan table
+  planTable: { display:'grid',gridTemplateColumns:'80px repeat(7,1fr)',gap:1,background:'var(--border)',borderRadius:14,overflow:'hidden',marginBottom:16 },
+  planHeader: { background:'var(--surface)',padding:'10px 8px',fontWeight:700,fontSize:'.72rem',textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text-muted)',textAlign:'center' },
+  planMealLabel: { background:'var(--surface)',padding:'12px 8px',fontWeight:600,fontSize:'.78rem',color:'var(--text-muted)',display:'flex',alignItems:'center',justifyContent:'center' },
+  planTableCell: { background:'var(--surface)',padding:'10px 8px',cursor:'pointer',minHeight:56,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',transition:'background .15s' },
+};
+
+// ======================== SVG ICONS ========================
+const Icon = {
+  plan: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+  recipes: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>,
+  pantry: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>,
+  list: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
+  chevL: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>,
+  chevR: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>,
+  check: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+  search: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  receipt: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 3 2V2l-3 2-3-2-3 2-3-2-3 2-3-2z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>,
+};
+
+// ======================== SYNC ENGINE ========================
+const LS_PREFIX = 'kitchen_';
+const DATA_KEYS = ['recipes','inventory','mealplans','shopping'];
+const DEFAULTS = { recipes:[], inventory:[], mealplans:{}, shopping:[] };
+
+function loadLocal() {
+  const d = {};
+  try {
+    DATA_KEYS.forEach(k => { const v=localStorage.getItem(LS_PREFIX+k); d[k]=v?JSON.parse(v):DEFAULTS[k]; });
+    d.updatedAt = localStorage.getItem(LS_PREFIX+'updated_at') || null;
+  } catch(e) { Object.assign(d, DEFAULTS); d.updatedAt=null; }
+  return d;
+}
+
+function saveLocal(data) {
+  try {
+    DATA_KEYS.forEach(k => localStorage.setItem(LS_PREFIX+k, JSON.stringify(data[k])));
+    const now = new Date().toISOString();
+    localStorage.setItem(LS_PREFIX+'updated_at', now);
+    localStorage.setItem(LS_PREFIX+'dirty', 'true');
+    return now;
+  } catch(e) { return data.updatedAt; }
+}
+
+function useKitchenData(userId) {
+  const [data, setData] = useState(loadLocal);
+  const [sync, setSync] = useState('offline');
+  const dirtyRef = useRef(false);
+  const timerRef = useRef(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+
+  async function push() {
+    if(!userId) return;
+    setSync('syncing');
+    try {
+      const d = dataRef.current;
+      const { error } = await sb.from('user_data').upsert({
+        user_id: userId,
+        kitchen_recipes: d.recipes,
+        kitchen_inventory: d.inventory,
+        kitchen_mealplans: d.mealplans,
+        kitchen_shopping: d.shopping,
+        updated_at: d.updatedAt
+      }, { onConflict: 'user_id' });
+      if(!error) { try{localStorage.removeItem(LS_PREFIX+'dirty')}catch(e){} dirtyRef.current=false; setSync('synced'); }
+      else setSync('offline');
+    } catch(e) { setSync('offline'); }
+  }
+
+  function schedulePush() { clearTimeout(timerRef.current); timerRef.current = setTimeout(push, 1500); }
+
+  async function pull() {
+    if(!userId) return;
+    setSync('syncing');
+    try {
+      const { data:row, error } = await sb.from('user_data')
+        .select('kitchen_recipes,kitchen_inventory,kitchen_mealplans,kitchen_shopping,updated_at')
+        .eq('user_id', userId).maybeSingle();
+      if(error) { setSync('offline'); return; }
+      if(!row) { if(dirtyRef.current) push(); else setSync('synced'); return; }
+      const localTime = dataRef.current.updatedAt ? new Date(dataRef.current.updatedAt).getTime() : 0;
+      const remoteTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+      if(remoteTime > localTime && !dirtyRef.current) {
+        const nd = { recipes:row.kitchen_recipes||[], inventory:row.kitchen_inventory||[], mealplans:row.kitchen_mealplans||{}, shopping:row.kitchen_shopping||[], updatedAt:row.updated_at };
+        setData(nd); dataRef.current = nd;
+        try { DATA_KEYS.forEach(k => localStorage.setItem(LS_PREFIX+k, JSON.stringify(nd[k]))); localStorage.setItem(LS_PREFIX+'updated_at', nd.updatedAt); } catch(e){}
+        setSync('synced');
+      } else if(dirtyRef.current) { push(); }
+      else { setSync('synced'); }
+    } catch(e) { setSync('offline'); }
+  }
+
+  function update(key, updater) {
+    setData(prev => {
+      const val = typeof updater==='function' ? updater(prev[key]) : updater;
+      const nd = {...prev, [key]:val};
+      nd.updatedAt = saveLocal(nd);
+      dirtyRef.current = true;
+      dataRef.current = nd;
+      schedulePush();
+      return nd;
+    });
+  }
+
+  useEffect(() => {
+    try { dirtyRef.current = localStorage.getItem(LS_PREFIX+'dirty')==='true'; } catch(e){}
+    pull();
+    const onOnline = () => { if(dirtyRef.current) push(); };
+    window.addEventListener('online', onOnline);
+    const interval = setInterval(pull, 30000);
+    return () => { window.removeEventListener('online', onOnline); clearInterval(interval); clearTimeout(timerRef.current); };
+  }, [userId]);
+
+  return { data, update, sync };
+}
+
+// ======================== SHARED COMPONENTS ========================
+function Overlay({open, onClose, title, wide, children}) {
+  if(!open) return null;
+  return (
+    <div className="overlay-backdrop" style={S.overlayBackdrop} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div className="overlay-panel" style={{...S.overlayPanel, ...(wide&&{maxWidth:640})}}>
+        <div style={S.overlayHead}>
+          <h2 style={{fontSize:'1.15rem'}}>{title}</h2>
+          <button style={S.overlayClose} onClick={onClose}>&times;</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({icon, title, msg, action, onAction}) {
+  return (
+    <div style={S.empty}>
+      <div style={S.emptyIcon}>{icon}</div>
+      <div style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'1.1rem',color:'var(--text)',marginBottom:6}}>{title}</div>
+      <div style={{fontSize:'.85rem',lineHeight:1.5,marginBottom:16}}>{msg}</div>
+      {action && <button style={{...S.btn,...S.btnPrimary}} onClick={onAction}>{action}</button>}
+    </div>
+  );
+}
+
+function CatDot({cat}) { return <span style={{width:8,height:8,borderRadius:'50%',flexShrink:0,background:CAT_COLORS[cat]||CAT_COLORS.Other}} />; }
+
+function SyncIndicator({status}) {
+  const colors = { synced:'var(--success)', syncing:'var(--warning)', offline:'var(--text-muted)' };
+  const labels = { synced:'Synced', syncing:'Syncing…', offline:'Offline' };
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:6,fontSize:'.72rem',fontWeight:500,color:colors[status]}}>
+      <span style={{...S.syncDot, background:colors[status]}} />
+      {labels[status]}
+    </div>
+  );
+}
+
+function Btn({primary,secondary,danger,sm,ghost,style:sx,...props}) {
+  const s = {...S.btn, ...(primary&&S.btnPrimary), ...(secondary&&S.btnSecondary), ...(danger&&S.btnDanger), ...(sm&&S.btnSm), ...(ghost&&{...S.btnGhost,padding:'6px 10px'}), ...sx};
+  return <button style={s} {...props} />;
+}
+
+// ======================== AUTH SCREEN ========================
+function AuthScreen({onLogin}) {
+  const [email, setEmail] = useState('');
+  const [pass, setPass] = useState('');
+  const [mode, setMode] = useState('login');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault(); setError(''); setLoading(true);
+    try {
+      const fn = mode==='login' ? sb.auth.signInWithPassword({email,password:pass}) : sb.auth.signUp({email,password:pass});
+      const {data,error:err} = await fn;
+      if(err) { setError(err.message); setLoading(false); return; }
+      if(data?.session) onLogin(data.session);
+      else if(mode==='signup') setError('Check your email to confirm your account.');
+      setLoading(false);
+    } catch(e) { setError('Connection failed'); setLoading(false); }
+  }
+
+  return (
+    <div style={S.authContainer}>
+      <div style={{textAlign:'center',marginBottom:32}}>
+        <div style={{fontSize:'3rem',marginBottom:8}}>🍳</div>
+        <h1 style={{fontSize:'1.8rem',letterSpacing:'-.02em',marginBottom:4}}>Our Kitchen</h1>
+        <p style={{color:'var(--text-muted)',fontSize:'.9rem'}}>Meal planning for two</p>
+      </div>
+      <form onSubmit={handleSubmit} style={{width:'100%',maxWidth:340}}>
+        <div style={S.field}><input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} required /></div>
+        <div style={S.field}><input type="password" placeholder="Password" value={pass} onChange={e=>setPass(e.target.value)} required minLength={6} /></div>
+        {error && <div style={{background:'var(--danger-bg)',color:'var(--danger)',borderRadius:10,padding:'10px 14px',fontSize:'.85rem',marginBottom:14}}>{error}</div>}
+        <Btn primary style={{width:'100%',marginBottom:12}} disabled={loading}>{loading ? 'Please wait…' : mode==='login' ? 'Log In' : 'Sign Up'}</Btn>
+        <p style={{textAlign:'center',fontSize:'.85rem',color:'var(--text-muted)'}}>
+          {mode==='login' ? "Don't have an account? " : 'Already have an account? '}
+          <span style={{color:'var(--accent)',cursor:'pointer',fontWeight:600}} onClick={()=>{setMode(mode==='login'?'signup':'login');setError('')}}>
+            {mode==='login' ? 'Sign Up' : 'Log In'}
+          </span>
+        </p>
+      </form>
+      <p style={{marginTop:40,fontSize:'.7rem',color:'var(--text-muted)'}}>v{APP_VERSION}</p>
+    </div>
+  );
+}
+
+// ======================== PLAN TAB ========================
+function PlanTab({data, update, isDesktop}) {
+  const {recipes, mealplans} = data;
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [picker, setPicker] = useState(null);
+  const [search, setSearch] = useState('');
+
+  const monday = useMemo(() => addWeeks(getMonday(), weekOffset), [weekOffset]);
+  const weekKey = fmtDate(monday);
+  const plan = mealplans[weekKey] || {};
+  const cells = plan.cells || {};
+  const recipeMap = useMemo(() => { const m={}; recipes.forEach(r=>m[r.id]=r); return m; }, [recipes]);
+
+  function assign(val) {
+    if(!picker) return;
+    const key = `${picker.day}-${picker.meal}`;
+    const newCells = {...cells};
+    if(val) newCells[key] = val; else delete newCells[key];
+    const newPlans = {...mealplans, [weekKey]: {cells:newCells, updatedAt:new Date().toISOString()}};
+    update('mealplans', newPlans);
+    if(val && val !== '__OUT__') {
+      update('recipes', rs => rs.map(r => r.id===val ? {...r, lastPlanned:weekKey} : r));
+    }
+    setPicker(null); setSearch('');
+  }
+
+  const filtered = recipes.filter(r => r.name?.toLowerCase().includes(search.toLowerCase()));
+
+  // Desktop table view
+  if (isDesktop) {
+    return (
+      <div>
+        <div style={S.pageHead}><h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em'}}>Meal Plan</h1></div>
+        <div style={S.weekNav}>
+          <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w-1)}>{Icon.chevL}</button>
+          <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(monday)?'This Week':fmtWeek(monday)}</span>
+          <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
+        </div>
+
+        <div style={S.planTable}>
+          {/* Header row */}
+          <div style={S.planHeader}></div>
+          {DAYS.map(day => <div key={day} style={S.planHeader}>{day}</div>)}
+
+          {/* Meal rows */}
+          {MEALS.map(meal => (
+            <React.Fragment key={meal}>
+              <div style={S.planMealLabel}>{meal}</div>
+              {DAYS.map(day => {
+                const key = `${day}-${meal}`;
+                const val = cells[key];
+                const isOut = val === '__OUT__';
+                const recipe = !isOut && val ? recipeMap[val] : null;
+                return (
+                  <div key={key} style={{...S.planTableCell}} onClick={()=>setPicker({day,meal})}
+                    onMouseEnter={e=>e.currentTarget.style.background='var(--accent-bg)'}
+                    onMouseLeave={e=>e.currentTarget.style.background='var(--surface)'}>
+                    {isOut ? <span style={{fontSize:'.82rem'}}>🍽️ Out</span>
+                      : recipe ? <span style={{fontSize:'.82rem',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'100%',display:'block'}}>{recipe.name}</span>
+                      : <span style={{color:'var(--text-muted)',fontSize:'.75rem'}}>+</span>}
+                  </div>
+                );
+              })}
+            </React.Fragment>
+          ))}
+        </div>
+
+        <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
+          {picker && (<div>
+            {cells[`${picker.day}-${picker.meal}`] && <Btn danger sm onClick={()=>assign(null)} style={{marginBottom:14}}>Clear</Btn>}
+            <Btn secondary sm onClick={()=>assign('__OUT__')} style={{marginBottom:14,marginLeft:cells[`${picker.day}-${picker.meal}`]?8:0}}>🍽️ Out for dinner</Btn>
+            <div style={{position:'relative',marginBottom:14}}>
+              <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
+              <input style={{paddingLeft:36}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
+            </div>
+            {filtered.length===0 ? <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes found. Add some in the Recipes tab.</p>
+            : filtered.map(r => (
+              <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(r.id)}>
+                <CatDot cat={r.category} />
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={S.itemName}>{r.name}</div>
+                  {r.lastPlanned && <div style={S.itemMeta}>Last planned {relDate(r.lastPlanned)}</div>}
+                </div>
+              </div>
+            ))}
+          </div>)}
+        </Overlay>
+      </div>
+    );
+  }
+
+  // Mobile stacked view
+  return (
+    <div>
+      <div style={S.pageHead}><h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em'}}>Meal Plan</h1></div>
+      <div style={S.weekNav}>
+        <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w-1)}>{Icon.chevL}</button>
+        <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(monday)?'This Week':fmtWeek(monday)}</span>
+        <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
+      </div>
+
+      {DAYS.map((day,di) => (
+        <div key={day} style={{marginBottom:12}}>
+          <div style={S.dayName}>{DAY_FULL[di]}</div>
+          <div style={{display:'flex',gap:8}}>
+            {MEALS.map(meal => {
+              const key = `${day}-${meal}`;
+              const val = cells[key];
+              const isOut = val === '__OUT__';
+              const recipe = !isOut && val ? recipeMap[val] : null;
+              return (
+                <div key={meal} style={S.mealCell} onClick={()=>setPicker({day,meal})}>
+                  <div style={{fontSize:'.68rem',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text-muted)',marginBottom:3}}>{meal}</div>
+                  {isOut ? <div style={{fontSize:'.85rem',fontWeight:500}}>🍽️ Out</div>
+                    : recipe ? <div style={{fontSize:'.85rem',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{recipe.name}</div>
+                    : <div style={{color:'var(--text-muted)',fontStyle:'italic',fontSize:'.8rem'}}>+ Add</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
+        {picker && (<div>
+          {cells[`${picker.day}-${picker.meal}`] && <Btn danger sm onClick={()=>assign(null)} style={{marginBottom:14}}>Clear</Btn>}
+          <Btn secondary sm onClick={()=>assign('__OUT__')} style={{marginBottom:14,marginLeft:cells[`${picker.day}-${picker.meal}`]?8:0}}>🍽️ Out for dinner</Btn>
+          <div style={{position:'relative',marginBottom:14}}>
+            <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
+            <input style={{paddingLeft:36}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
+          </div>
+          {filtered.length===0 ? <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes found. Add some in the Recipes tab.</p>
+          : filtered.map(r => (
+            <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(r.id)}>
+              <CatDot cat={r.category} />
+              <div style={{flex:1,minWidth:0}}>
+                <div style={S.itemName}>{r.name}</div>
+                {r.lastPlanned && <div style={S.itemMeta}>Last planned {relDate(r.lastPlanned)}</div>}
+              </div>
+            </div>
+          ))}
+        </div>)}
+      </Overlay>
+    </div>
+  );
+}
+
+// ======================== RECIPES TAB ========================
+function RecipesTab({data, update, isDesktop}) {
+  const {recipes} = data;
+  const [search, setSearch] = useState('');
+  const [view, setView] = useState(null);
+  const [form, setForm] = useState(null);
+
+  function openAdd() {
+    setForm({name:'',servings:'4',prepTime:'',cookTime:'',category:'Other',ingredients:[{name:'',qty:''}],method:['']});
+    setView('add');
+  }
+  function openEdit(r) {
+    setForm({...r,ingredients:r.ingredients?.length?[...r.ingredients.map(i=>({...i}))]:[{name:'',qty:''}],method:r.method?.length?[...r.method]:['']});
+    setView('edit');
+  }
+
+  function saveRecipe() {
+    if(!form?.name?.trim()) return;
+    const rec = {
+      name:form.name.trim(), servings:form.servings||'4', prepTime:form.prepTime||'', cookTime:form.cookTime||'',
+      category:form.category||'Other',
+      ingredients:form.ingredients.filter(i=>i.name.trim()).map(i=>({name:i.name.trim(),qty:i.qty.trim()})),
+      method:form.method.filter(s=>s.trim()),
+    };
+    if(form.id) {
+      update('recipes', rs => rs.map(r => r.id===form.id ? {...r,...rec} : r));
+    } else {
+      rec.id = genId(); rec.createdAt = new Date().toISOString();
+      update('recipes', rs => [...rs, rec]);
+    }
+    setView(null); setForm(null);
+  }
+
+  function deleteRecipe(id) {
+    update('recipes', rs => rs.filter(r => r.id!==id));
+    setView(null);
+  }
+
+  function addToList(recipe) {
+    if(!recipe.ingredients) return;
+    update('shopping', list => {
+      const items = recipe.ingredients.filter(i=>i.name.trim()).map(i => ({
+        id:genId(), name:i.name.trim(), qty:i.qty||'1', category:recipe.category||'Other',
+        checked:false, fromRecipe:recipe.name, addedAt:new Date().toISOString()
+      }));
+      return [...list, ...items];
+    });
+    setView(null);
+  }
+
+  const filtered = recipes.filter(r => r.name?.toLowerCase().includes(search.toLowerCase()));
+
+  function RecipeForm() {
+    const f = form;
+    const set = (k,v) => setForm(p=>({...p,[k]:v}));
+    const updateIng = (i,k,v) => { const a=[...f.ingredients]; a[i]={...a[i],[k]:v}; set('ingredients',a); };
+    const addIng = () => set('ingredients',[...f.ingredients,{name:'',qty:''}]);
+    const rmIng = i => set('ingredients',f.ingredients.filter((_,idx)=>idx!==i));
+    const updateStep = (i,v) => { const a=[...f.method]; a[i]=v; set('method',a); };
+    const addStep = () => set('method',[...f.method,'']);
+    const rmStep = i => set('method',f.method.filter((_,idx)=>idx!==i));
+    return (<div>
+      <div style={S.field}><label style={S.label}>Name</label><input value={f.name} onChange={e=>set('name',e.target.value)} placeholder="Recipe name" /></div>
+      <div style={S.fieldRow}>
+        <div style={{...S.field,flex:1}}><label style={S.label}>Servings</label><input value={f.servings} onChange={e=>set('servings',e.target.value)} placeholder="4" /></div>
+        <div style={{...S.field,flex:1}}><label style={S.label}>Category</label>
+          <select value={f.category} onChange={e=>set('category',e.target.value)}>
+            {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={S.fieldRow}>
+        <div style={{...S.field,flex:1}}><label style={S.label}>Prep Time</label><input value={f.prepTime} onChange={e=>set('prepTime',e.target.value)} placeholder="15 mins" /></div>
+        <div style={{...S.field,flex:1}}><label style={S.label}>Cook Time</label><input value={f.cookTime} onChange={e=>set('cookTime',e.target.value)} placeholder="30 mins" /></div>
+      </div>
+      <div style={S.sectionTitle}>Ingredients</div>
+      {f.ingredients.map((ing,i) => (
+        <div key={i} style={S.ingRow}>
+          <input style={{flex:2}} placeholder="Ingredient" value={ing.name} onChange={e=>updateIng(i,'name',e.target.value)} />
+          <input style={{flex:1}} placeholder="Qty" value={ing.qty} onChange={e=>updateIng(i,'qty',e.target.value)} />
+          {f.ingredients.length>1 && <button style={S.removeBtn} onClick={()=>rmIng(i)}>&times;</button>}
+        </div>
+      ))}
+      <button style={S.btnGhost} onClick={addIng}>+ Add ingredient</button>
+      <div style={S.sectionTitle}>Method</div>
+      {f.method.map((step,i) => (
+        <div key={i} style={S.ingRow}>
+          <input style={{flex:1}} placeholder={`Step ${i+1}`} value={step} onChange={e=>updateStep(i,e.target.value)} />
+          {f.method.length>1 && <button style={S.removeBtn} onClick={()=>rmStep(i)}>&times;</button>}
+        </div>
+      ))}
+      <button style={S.btnGhost} onClick={addStep}>+ Add step</button>
+      <div style={{display:'flex',gap:8,marginTop:20}}>
+        <Btn primary onClick={saveRecipe} disabled={!f.name.trim()}>Save Recipe</Btn>
+      </div>
+    </div>);
+  }
+
+  function RecipeDetail({recipe}) {
+    return (<div>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+        <CatDot cat={recipe.category} />
+        <span style={{...S.badge,background:'var(--border)',color:'var(--text-muted)'}}>{recipe.category}</span>
+      </div>
+      <div style={{display:'flex',gap:16,flexWrap:'wrap',margin:'12px 0'}}>
+        {recipe.servings && <span style={{fontSize:'.82rem',color:'var(--text-muted)'}}><strong style={{color:'var(--text)',fontWeight:600}}>{recipe.servings}</strong> servings</span>}
+        {recipe.prepTime && <span style={{fontSize:'.82rem',color:'var(--text-muted)'}}><strong style={{color:'var(--text)',fontWeight:600}}>{recipe.prepTime}</strong> prep</span>}
+        {recipe.cookTime && <span style={{fontSize:'.82rem',color:'var(--text-muted)'}}><strong style={{color:'var(--text)',fontWeight:600}}>{recipe.cookTime}</strong> cook</span>}
+      </div>
+      {recipe.ingredients?.length>0 && (<>
+        <div style={S.sectionTitle}>Ingredients</div>
+        {recipe.ingredients.map((ing,i) => (
+          <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid var(--border)',fontSize:'.88rem'}}>
+            <span>{ing.name}</span><span style={{color:'var(--text-muted)',fontVariantNumeric:'tabular-nums'}}>{ing.qty}</span>
+          </div>
+        ))}
+      </>)}
+      {recipe.method?.length>0 && (<>
+        <div style={S.sectionTitle}>Method</div>
+        {recipe.method.map((step,i) => (
+          <div key={i} style={{display:'flex',gap:10,padding:'8px 0',borderBottom:'1px solid var(--border)',fontSize:'.88rem',lineHeight:1.5}}>
+            <span style={{width:22,height:22,borderRadius:'50%',background:'var(--accent-bg)',color:'var(--accent)',fontSize:'.72rem',fontWeight:700,
+              display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{i+1}</span>
+            <span>{step}</span>
+          </div>
+        ))}
+      </>)}
+      <div style={{display:'flex',gap:8,marginTop:18,flexWrap:'wrap'}}>
+        <Btn primary sm onClick={()=>addToList(recipe)}>Add to List</Btn>
+        <Btn secondary sm onClick={()=>openEdit(recipe)}>Edit</Btn>
+        <Btn danger sm onClick={()=>deleteRecipe(recipe.id)}>Delete</Btn>
+      </div>
+    </div>);
+  }
+
+  return (<div>
+    <div style={S.pageHead}>
+      <h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em',flex:1}}>Recipes</h1>
+      <Btn primary sm onClick={openAdd}>+ Add</Btn>
+    </div>
+    {recipes.length>0 && (
+      <div style={{position:'relative',marginBottom:14}}>
+        <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
+        <input style={{paddingLeft:36}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
+      </div>
+    )}
+    {filtered.length===0 && !search ? (
+      <EmptyState icon="📖" title="No recipes yet" msg="Start building your collection." action="+ Add Recipe" onAction={openAdd} />
+    ) : filtered.length===0 ? (
+      <p style={{textAlign:'center',color:'var(--text-muted)',padding:20}}>No recipes match "{search}"</p>
+    ) : (
+      <div style={isDesktop ? S.cardGrid : {}}>
+        {filtered.map(r => (
+          <div key={r.id} style={{...S.card,cursor:'pointer'}} onClick={()=>setView(r)}>
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <span style={{fontSize:'1.2rem'}}>{CAT_EMOJI[r.category]||'📦'}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={S.itemName}>{r.name}</div>
+                <div style={S.itemMeta}>{r.ingredients?.length||0} ingredients{r.lastPlanned && <> · Last planned {relDate(r.lastPlanned)}</>}</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+    <Overlay open={view==='add'||view==='edit'} onClose={()=>{setView(null);setForm(null)}} title={view==='edit'?'Edit Recipe':'Add Recipe'}>
+      {form && <RecipeForm />}
+    </Overlay>
+    <Overlay open={view&&typeof view==='object'&&view.id} onClose={()=>setView(null)} title={view?.name||''}>
+      {view?.id && <RecipeDetail recipe={view} />}
+    </Overlay>
+  </div>);
+}
+
+// ======================== PANTRY TAB ========================
+function PantryTab({data, update, isDesktop}) {
+  const {inventory} = data;
+  const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newCat, setNewCat] = useState('Other');
+  const [receiptText, setReceiptText] = useState('');
+  const [parsedItems, setParsedItems] = useState([]);
+  const [importDate, setImportDate] = useState(fmtDate(new Date()));
+  const [importStep, setImportStep] = useState('paste'); // 'paste' | 'review'
+
+  const sorted = useMemo(() => {
+    return [...inventory].map(i=>({...i,restock:calcRestock(i.purchases)}))
+      .sort((a,b) => {
+        if(a.restock?.isOverdue && !b.restock?.isOverdue) return -1;
+        if(!a.restock?.isOverdue && b.restock?.isOverdue) return 1;
+        return (a.name||'').localeCompare(b.name||'');
+      });
+  }, [inventory]);
+
+  const overdueCount = sorted.filter(i=>i.restock?.isOverdue).length;
+
+  function addItem() {
+    if(!newName.trim()) return;
+    const today = fmtDate(new Date());
+    const existing = inventory.find(i=>i.name.toLowerCase()===newName.trim().toLowerCase());
+    if(existing) {
+      update('inventory', inv => inv.map(i=>i.id===existing.id?{...i,purchases:[...(i.purchases||[]),today]}:i));
+    } else {
+      update('inventory', inv => [...inv, {id:genId(),name:newName.trim(),category:newCat,purchases:[today],createdAt:new Date().toISOString()}]);
+    }
+    setNewName(''); setNewCat('Other'); setShowAdd(false);
+  }
+
+  function markBought(item) {
+    const today = fmtDate(new Date());
+    update('inventory', inv => inv.map(i=>i.id===item.id?{...i,purchases:[...(i.purchases||[]),today]}:i));
+  }
+
+  function removeItem(id) {
+    update('inventory', inv => inv.filter(i=>i.id!==id));
+  }
+
+  // Receipt import
+  function handleParse() {
+    const items = parseReceipt(receiptText);
+    setParsedItems(items);
+    setImportStep('review');
+  }
+
+  function toggleParsedItem(idx) {
+    setParsedItems(prev => prev.map((item,i) => i===idx ? {...item, selected:!item.selected} : item));
+  }
+
+  function updateParsedCategory(idx, cat) {
+    setParsedItems(prev => prev.map((item,i) => i===idx ? {...item, category:cat} : item));
+  }
+
+  function confirmImport() {
+    const selected = parsedItems.filter(i => i.selected);
+    if (selected.length === 0) return;
+    update('inventory', inv => {
+      let updated = [...inv];
+      for (const item of selected) {
+        const existing = updated.find(i => i.name.toLowerCase() === item.name.toLowerCase());
+        if (existing) {
+          updated = updated.map(i => i.id===existing.id ? {...i, purchases:[...(i.purchases||[]),importDate]} : i);
+        } else {
+          updated.push({id:genId(), name:item.name, category:item.category, purchases:[importDate], createdAt:new Date().toISOString()});
+        }
+      }
+      return updated;
+    });
+    // Reset and close
+    setShowImport(false); setReceiptText(''); setParsedItems([]); setImportStep('paste');
+  }
+
+  function closeImport() {
+    setShowImport(false); setReceiptText(''); setParsedItems([]); setImportStep('paste');
+  }
+
+  const selectedCount = parsedItems.filter(i=>i.selected).length;
+
+  return (<div>
+    <div style={S.pageHead}>
+      <h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em',flex:1}}>Pantry</h1>
+      <div style={{display:'flex',gap:6}}>
+        <Btn secondary sm onClick={()=>setShowImport(true)} style={{gap:4}}>
+          {Icon.receipt} Import
+        </Btn>
+        <Btn primary sm onClick={()=>setShowAdd(true)}>+ Add</Btn>
+      </div>
+    </div>
+
+    {overdueCount>0 && (
+      <div style={{background:'var(--warning-bg)',borderRadius:10,padding:'10px 14px',marginBottom:14,fontSize:'.85rem',color:'var(--warning)',fontWeight:500}}>
+        {overdueCount} item{overdueCount>1?'s':''} may need restocking
+      </div>
+    )}
+
+    {inventory.length===0 ? (
+      <EmptyState icon="📦" title="Pantry is empty" msg="Add items when you buy them to track restock patterns, or import a receipt." action="+ Add Item" onAction={()=>setShowAdd(true)} />
+    ) : (
+      <div style={isDesktop ? S.cardGrid : {}}>
+        {sorted.map(item => {
+          const r = item.restock;
+          const lastDate = item.purchases?.length ? [...item.purchases].sort().pop() : null;
+          return (
+            <div key={item.id} style={isDesktop ? {...S.card,marginBottom:0} : S.itemRow}>
+              <div style={{display:'flex',alignItems:'center',gap:12,width:'100%'}}>
+                <span style={{fontSize:'1.1rem'}}>{CAT_EMOJI[item.category]||'📦'}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <span style={S.itemName}>{item.name}</span>
+                    {r?.isOverdue && <span style={{...S.badge,background:'var(--warning-bg)',color:'var(--warning)'}}>Overdue {r.overdue}d</span>}
+                  </div>
+                  <div style={S.itemMeta}>
+                    {lastDate && <>Last bought {relDate(lastDate)}</>}
+                    {r && <> · Every ~{r.avgDays} days</>}
+                    {!r && item.purchases?.length===1 && <> · Buy again to track frequency</>}
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:4,flexShrink:0}}>
+                  <Btn secondary sm onClick={()=>markBought(item)}>Bought</Btn>
+                  <button style={{...S.removeBtn,width:28,height:28}} onClick={()=>removeItem(item.id)}>&times;</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    )}
+
+    {/* Add single item overlay */}
+    <Overlay open={showAdd} onClose={()=>setShowAdd(false)} title="Add to Pantry">
+      <div style={S.field}><label style={S.label}>Item name</label><input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="e.g. Whole milk" autoFocus /></div>
+      <div style={S.field}><label style={S.label}>Category</label>
+        <select value={newCat} onChange={e=>setNewCat(e.target.value)}>
+          {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      <p style={{fontSize:'.82rem',color:'var(--text-muted)',marginBottom:14}}>Adds the item with today as the purchase date.</p>
+      <Btn primary onClick={addItem} disabled={!newName.trim()}>Add Item</Btn>
+    </Overlay>
+
+    {/* Receipt import overlay */}
+    <Overlay open={showImport} onClose={closeImport} title={importStep==='paste' ? 'Import Receipt' : `Review Items (${selectedCount} selected)`} wide>
+      {importStep === 'paste' ? (
+        <div>
+          <p style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:14,lineHeight:1.5}}>
+            Paste your order confirmation text from Sainsbury's, Ocado or similar. The parser will extract item names and auto-categorise them.
+          </p>
+          <div style={S.field}>
+            <label style={S.label}>Purchase date</label>
+            <input type="date" value={importDate} onChange={e=>setImportDate(e.target.value)} />
+          </div>
+          <div style={S.field}>
+            <label style={S.label}>Receipt text</label>
+            <textarea
+              value={receiptText}
+              onChange={e=>setReceiptText(e.target.value)}
+              placeholder={"Paste your order receipt here…\n\ne.g.\nSemi Skimmed Milk 2.27l £1.35\nFree Range Eggs x6 £1.75\nChicken Breast Fillets 300g £3.50"}
+              style={{minHeight:200,fontFamily:'monospace',fontSize:'.82rem'}}
+            />
+          </div>
+          <Btn primary onClick={handleParse} disabled={!receiptText.trim()}>Parse Receipt</Btn>
+        </div>
+      ) : (
+        <div>
+          <p style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:14,lineHeight:1.5}}>
+            {parsedItems.length === 0
+              ? "Couldn't find any items in that text. Try pasting just the product lines with prices."
+              : `Found ${parsedItems.length} item${parsedItems.length>1?'s':''}. Deselect any you don't want, and fix categories if needed.`}
+          </p>
+
+          {parsedItems.length > 0 && (
+            <>
+              <div style={{marginBottom:10,display:'flex',gap:8}}>
+                <button style={S.btnGhost} onClick={()=>setParsedItems(p=>p.map(i=>({...i,selected:true})))}>Select all</button>
+                <button style={S.btnGhost} onClick={()=>setParsedItems(p=>p.map(i=>({...i,selected:false})))}>Deselect all</button>
+              </div>
+
+              <div style={{maxHeight:400,overflowY:'auto',marginBottom:16}}>
+                {parsedItems.map((item, idx) => (
+                  <div key={idx} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid var(--border)',opacity:item.selected?1:0.4}}>
+                    <button style={{...S.checkbox,...(item.selected&&S.checkboxOn)}} onClick={()=>toggleParsedItem(idx)}>
+                      {item.selected && Icon.check}
+                    </button>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:'.88rem',fontWeight:500}}>{item.name}</div>
+                    </div>
+                    <select
+                      value={item.category}
+                      onChange={e=>updateParsedCategory(idx, e.target.value)}
+                      style={{width:'auto',padding:'4px 8px',fontSize:'.78rem',minWidth:100}}
+                    >
+                      {CATEGORIES.map(c=><option key={c} value={c}>{CAT_EMOJI[c]} {c}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{display:'flex',gap:8}}>
+                <Btn primary onClick={confirmImport} disabled={selectedCount===0}>
+                  Import {selectedCount} item{selectedCount!==1?'s':''}
+                </Btn>
+                <Btn secondary onClick={()=>{setImportStep('paste')}}>Back</Btn>
+              </div>
+            </>
+          )}
+
+          {parsedItems.length === 0 && (
+            <Btn secondary onClick={()=>setImportStep('paste')}>Back</Btn>
+          )}
+        </div>
+      )}
+    </Overlay>
+  </div>);
+}
+
+// ======================== SHOPPING TAB ========================
+function ShoppingTab({data, update, isDesktop}) {
+  const {shopping} = data;
+  const [newName, setNewName] = useState('');
+  const [newQty, setNewQty] = useState('');
+
+  const grouped = useMemo(() => {
+    const unchecked = shopping.filter(i=>!i.checked);
+    const checked = shopping.filter(i=>i.checked);
+    const groups = {};
+    unchecked.forEach(i => { const c=i.category||'Other'; if(!groups[c]) groups[c]=[]; groups[c].push(i); });
+    return {groups, checked};
+  }, [shopping]);
+
+  function addItem(e) {
+    e?.preventDefault?.();
+    if(!newName.trim()) return;
+    update('shopping', list => [...list, {id:genId(),name:newName.trim(),qty:newQty.trim()||'1',category:'Other',checked:false,addedAt:new Date().toISOString()}]);
+    setNewName(''); setNewQty('');
+  }
+
+  function toggleCheck(item) {
+    update('shopping', list => list.map(i=>i.id===item.id?{...i,checked:!i.checked}:i));
+  }
+
+  function clearChecked() {
+    update('shopping', list => list.filter(i=>!i.checked));
+  }
+
+  const orderedCats = CATEGORIES.filter(c=>grouped.groups[c]);
+
+  return (<div>
+    <div style={S.pageHead}>
+      <h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em',flex:1}}>Shopping List</h1>
+      {grouped.checked.length>0 && <Btn secondary sm onClick={clearChecked}>Clear done</Btn>}
+    </div>
+
+    <form onSubmit={addItem} style={{display:'flex',gap:8,marginBottom:16,maxWidth:isDesktop?500:undefined}}>
+      <input style={{flex:3}} placeholder="Add item…" value={newName} onChange={e=>setNewName(e.target.value)} />
+      <input style={{flex:1,minWidth:60}} placeholder="Qty" value={newQty} onChange={e=>setNewQty(e.target.value)} />
+      <Btn primary sm type="submit" disabled={!newName.trim()}>Add</Btn>
+    </form>
+
+    {shopping.length===0 ? (
+      <EmptyState icon="🛒" title="List is empty" msg="Add items here or tap 'Add to List' on a recipe." />
+    ) : (<>
+      <div style={isDesktop ? {display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16} : {}}>
+        {orderedCats.map(cat => (
+          <div key={cat} style={{marginBottom:isDesktop?0:16}}>
+            <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
+              <span>{CAT_EMOJI[cat]||'📦'}</span> {cat}
+            </div>
+            {grouped.groups[cat].map(item => (
+              <div key={item.id} style={S.checkRow}>
+                <button style={{...S.checkbox,...(item.checked&&S.checkboxOn)}} onClick={()=>toggleCheck(item)}>{item.checked&&Icon.check}</button>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{...S.itemName,...(item.checked&&{textDecoration:'line-through',color:'var(--text-muted)'})}}>{item.name}</div>
+                  {item.fromRecipe && <div style={S.itemMeta}>From {item.fromRecipe}</div>}
+                </div>
+                <span style={{color:'var(--text-muted)',fontSize:'.82rem',fontVariantNumeric:'tabular-nums',flexShrink:0}}>{item.qty}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {grouped.checked.length>0 && (
+        <div style={{marginBottom:16,marginTop:isDesktop?16:0}}>
+          <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6,opacity:.6}}>Done</div>
+          {grouped.checked.map(item => (
+            <div key={item.id} style={S.checkRow}>
+              <button style={{...S.checkbox,...S.checkboxOn}} onClick={()=>toggleCheck(item)}>{Icon.check}</button>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{...S.itemName,textDecoration:'line-through',color:'var(--text-muted)'}}>{item.name}</div>
+              </div>
+              <span style={{color:'var(--text-muted)',fontSize:'.82rem',flexShrink:0}}>{item.qty}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>)}
+  </div>);
+}
+
+// ======================== TAB BAR ========================
+function TabBar({tab, setTab, isDesktop}) {
+  const tabs = [{id:'plan',label:'Plan',icon:Icon.plan},{id:'recipes',label:'Recipes',icon:Icon.recipes},{id:'pantry',label:'Pantry',icon:Icon.pantry},{id:'list',label:'List',icon:Icon.list}];
+  return (
+    <nav style={isDesktop ? {...S.tabBar,...S.tabBarDesktop} : S.tabBar}>
+      {tabs.map(t => (
+        <button key={t.id}
+          style={{
+            ...S.tabBtn,
+            ...(isDesktop && S.tabBtnDesktop),
+            ...(tab===t.id && (isDesktop ? S.tabActiveDesktop : S.tabActive))
+          }}
+          onClick={()=>setTab(t.id)}>
+          {t.icon}<span>{t.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+// ======================== APP ========================
+function App() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('plan');
+
+  useEffect(() => {
+    sb.auth.getSession().then(({data:{session:s}}) => { setSession(s); setLoading(false); });
+    const {data:{subscription}} = sb.auth.onAuthStateChange((_,s) => setSession(s));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => { try{const t=localStorage.getItem('kitchen_tab');if(t)setTab(t)}catch(e){} }, []);
+  useEffect(() => { try{localStorage.setItem('kitchen_tab',tab)}catch(e){} }, [tab]);
+
+  if(loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',color:'var(--text-muted)'}}>Loading…</div>;
+  if(!session) return <AuthScreen onLogin={setSession} />;
+
+  return <MainApp session={session} tab={tab} setTab={setTab} />;
+}
+
+function MainApp({session, tab, setTab}) {
+  const {data, update, sync} = useKitchenData(session.user.id);
+  const isDesktop = useMediaQuery('(min-width: 768px)');
+
+  async function logout() {
+    await sb.auth.signOut();
+  }
+
+  return (
+    <div style={{display:'flex',flexDirection:isDesktop?'row':'column',height:'100vh',minHeight:0}}>
+      {/* Desktop: sidebar on the left */}
+      {isDesktop && (
+        <div style={{display:'flex',flexDirection:'column',borderRight:'1px solid var(--border)',background:'var(--surface)',width:'var(--sidebar-w)',minWidth:'var(--sidebar-w)'}}>
+          <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border)'}}>
+            <h1 style={{fontSize:'1.1rem',letterSpacing:'-.01em',marginBottom:4}}>🍳 Our Kitchen</h1>
+            <SyncIndicator status={sync} />
+          </div>
+          <TabBar tab={tab} setTab={setTab} isDesktop={true} />
+          <div style={{marginTop:'auto',padding:'12px 20px',borderTop:'1px solid var(--border)'}}>
+            <button style={{...S.btnGhost,padding:'6px 0'}} onClick={logout}>Log out</button>
+            <div style={{fontSize:'.68rem',color:'var(--text-muted)',marginTop:4}}>v{APP_VERSION}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Main content area */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0,minHeight:0}}>
+        {/* Mobile header */}
+        {!isDesktop && (
+          <div style={S.header}>
+            <h1 style={{fontSize:'1.2rem',letterSpacing:'-.01em'}}>🍳 Our Kitchen</h1>
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <SyncIndicator status={sync} />
+              <button style={S.btnGhost} onClick={logout}>Log out</button>
+            </div>
+          </div>
+        )}
+
+        <div style={{
+          ...S.content,
+          ...(isDesktop && S.contentDesktop),
+        }}>
+          <div style={{maxWidth:'var(--content-max)',margin:isDesktop?'0 auto':undefined,width:'100%'}}>
+            {tab==='plan' && <PlanTab data={data} update={update} isDesktop={isDesktop} />}
+            {tab==='recipes' && <RecipesTab data={data} update={update} isDesktop={isDesktop} />}
+            {tab==='pantry' && <PantryTab data={data} update={update} isDesktop={isDesktop} />}
+            {tab==='list' && <ShoppingTab data={data} update={update} isDesktop={isDesktop} />}
+          </div>
+        </div>
+
+        {/* Mobile tab bar */}
+        {!isDesktop && <TabBar tab={tab} setTab={setTab} isDesktop={false} />}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<script>
+// Service worker registration
+if('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
