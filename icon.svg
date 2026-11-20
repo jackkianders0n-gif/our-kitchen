@@ -1,4 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="108" fill="#D4715E"/>
-  <text x="256" y="310" font-size="260" text-anchor="middle" dominant-baseline="central" font-family="sans-serif">🍳</text>
+  <rect width="512" height="512" rx="112" fill="#D4715E"/>
+<g transform="translate(256 256) scale(1) translate(-256 -275)">
+  <g fill="none" stroke="#FFF9F5" stroke-linecap="round" stroke-width="20">
+    <path d="M200 216c-22-26 22-50 0-84"/>
+    <path d="M256 216c-22-26 22-50 0-84"/>
+    <path d="M312 216c-22-26 22-50 0-84"/>
+  </g>
+  <path d="M120 250h272a8 8 0 0 1 8 8c0 72-56 132-128 138h-32c-72-6-128-66-128-138a8 8 0 0 1 8-8z" fill="#FFF9F5"/>
+  <rect x="196" y="402" width="120" height="16" rx="8" fill="#FFF9F5"/></g>
 </svg>
