@@ -1,4 +1,4 @@
-const CACHE_VERSION = '1.3.1';
+const CACHE_VERSION = '1.4.0';
 const CACHE_NAME = 'our-kitchen-v' + CACHE_VERSION;
 
 const PRECACHE = [

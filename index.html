@@ -7,7 +7,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#D4715E">
+<meta name="theme-color" content="#FFF9F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1512" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
@@ -35,6 +36,12 @@
   --overlay: rgba(0,0,0,0.55); color-scheme: dark;
 }
 *{box-sizing:border-box;margin:0}
+button{font-family:inherit;-webkit-tap-highlight-color:transparent}
+button:focus-visible,a:focus-visible,[role=button]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hscroll{scrollbar-width:none}.hscroll::-webkit-scrollbar{display:none}
+.plan-cell:hover{box-shadow:inset 0 0 0 2px var(--accent)}
+.plan-add{opacity:.35;transition:opacity .15s}.plan-cell:hover .plan-add{opacity:1}
+input[type=search]::-webkit-search-cancel-button{opacity:.5}
 html,body{height:100%}
 body{background:var(--bg);color:var(--text);font-family:'DM Sans',system-ui,sans-serif;
   padding:0 max(16px,env(safe-area-inset-left,0px)) 0 max(16px,env(safe-area-inset-right,0px));
@@ -70,7 +77,7 @@ const {useState,useEffect,useCallback,useMemo,useRef,createContext,useContext} =
 // ======================== CONFIG ========================
 const SUPABASE_URL = 'https://wvedhcuebfdfkhfvphlb.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_bkeGnvruQEz3MsVDZiJ03g_bhXXDjgC';
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4.0';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: 'kitchen-auth' }
 });
@@ -80,7 +87,6 @@ const DAYS = ['Sat','Sun','Mon','Tue','Wed','Thu','Fri'];
 const DAY_FULL = ['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'];
 const MEALS = ['Lunch','Dinner'];
 const CATEGORIES = ['Fruit & Veg','Meat & Fish','Dairy','Bakery','Frozen','Drinks','Cupboard','Household','Other'];
-const CAT_EMOJI = {'Fruit & Veg':'🥬','Meat & Fish':'🥩','Dairy':'🧀','Bakery':'🍞','Frozen':'🧊','Drinks':'☕','Cupboard':'🫙','Household':'🧹','Other':'📦'};
 const CAT_COLORS = {'Fruit & Veg':'#6B9B6E','Meat & Fish':'#D4715E','Dairy':'#7BAFD4','Bakery':'#D4A96B','Frozen':'#7BC4D4','Drinks':'#9B7BD4','Cupboard':'#D49B6B','Household':'#D47BA4','Other':'#A0958B'};
 // A plan cell holds a recipe id, '__OUT__', or {note:'…'} for a meal with no recipe
 const cellNote = v => (v && typeof v === 'object' && v.note) ? v.note : null;
@@ -206,7 +212,7 @@ const S = {
   tabActiveDesktop: { color:'var(--accent)',background:'var(--accent-bg)' },
   content: { flex:1,overflowY:'auto',minHeight:0,paddingBottom:'calc(68px + env(safe-area-inset-bottom,0px))',paddingTop:8,WebkitOverflowScrolling:'touch' },
   contentDesktop: { paddingBottom:24,paddingTop:16,paddingLeft:32,paddingRight:32 },
-  pageHead: { display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16 },
+  pageHead: { display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:18 },
   card: { background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',padding:'14px 16px',marginBottom:10 },
   btn: { display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px 18px',borderRadius:10,border:'none',cursor:'pointer',
     fontFamily:'DM Sans,system-ui',fontSize:'.875rem',fontWeight:600,transition:'background .15s,opacity .15s',whiteSpace:'nowrap' },
@@ -245,6 +251,12 @@ const S = {
   removeBtn: { width:28,height:28,borderRadius:'50%',border:'none',background:'var(--danger-bg)',color:'var(--danger)',cursor:'pointer',fontSize:'1rem',flexShrink:0,
     display:'flex',alignItems:'center',justifyContent:'center' },
   syncDot: { width:8,height:8,borderRadius:'50%',flexShrink:0 },
+  iconBtn: { width:38,height:38,borderRadius:12,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text-muted)',cursor:'pointer',
+    display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 },
+  chip: { display:'inline-flex',alignItems:'center',gap:4,padding:'6px 12px',borderRadius:999,border:'1px solid var(--border)',background:'var(--surface)',
+    color:'var(--text)',fontSize:'.8rem',fontWeight:500,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'inherit' },
+  chipOn: { background:'var(--text)',color:'var(--bg)',borderColor:'var(--text)' },
+  tag: { display:'inline-flex',alignItems:'center',padding:'2px 8px',borderRadius:999,background:'var(--border)',color:'var(--text-muted)',fontSize:'.72rem',fontWeight:600 },
   header: { display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0 8px',
     paddingTop:'max(12px, env(safe-area-inset-top, 0px))' },
   headerDesktop: { paddingLeft:20,paddingRight:20 },
@@ -270,6 +282,153 @@ const Icon = {
   search: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
   receipt: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 3 2V2l-3 2-3-2-3 2-3-2-3 2-3-2z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>,
 };
+const svgI = (children, size = 18) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}>{children}</svg>;
+Object.assign(Icon, {
+  chef: svgI(<><path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.46.32-.84.73-1.04a4 4 0 0 0-2.13-7.59 5 5 0 0 0-9.2 0 4 4 0 0 0-2.13 7.59c.41.2.73.58.73 1.04V20a1 1 0 0 0 1 1Z"/><path d="M6 17h12"/></>),
+  sparkles: svgI(<><path d="M12 3l1.8 4.9L18.7 9.7 13.8 11.5 12 16.4 10.2 11.5 5.3 9.7 10.2 7.9z"/><path d="M19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></>, 16),
+  cart: svgI(<><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></>, 16),
+  shuffle: svgI(<><path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h2a4 4 0 0 0 3.3-1.7l5.4-7.6A4 4 0 0 1 16 7h6"/><path d="M2 6h2a4 4 0 0 1 3.6 2.2"/><path d="M22 17h-6a4 4 0 0 1-3.3-1.8l-.4-.4"/></>, 16),
+  link: svgI(<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>, 16),
+  timer: svgI(<><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/></>, 16),
+  pause: svgI(<><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></>, 14),
+  bell: svgI(<><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></>, 16),
+  utensils: svgI(<><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></>, 16),
+  repeat: svgI(<><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></>, 14),
+  box: svgI(<><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></>, 16),
+  pencil: svgI(<><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></>, 16),
+  settings: svgI(<><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></>, 20),
+  x: svgI(<><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>, 16),
+  xSm: svgI(<><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>, 13),
+  plus: svgI(<><path d="M12 5v14"/><path d="M5 12h14"/></>, 16),
+  plusSm: svgI(<><path d="M12 5v14"/><path d="M5 12h14"/></>, 13),
+  clock: svgI(<><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></>, 14),
+  users: svgI(<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>, 14),
+  external: svgI(<><path d="M7 7h10v10"/><path d="M7 17 17 7"/></>, 14),
+  book: svgI(<><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></>, 26),
+  boxLg: svgI(<><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></>, 26),
+  cartLg: svgI(<><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></>, 26),
+  logout: svgI(<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></>, 16),
+  refresh: svgI(<><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></>, 14),
+  check2: svgI(<path d="M20 6 9 17l-5-5"/>, 14),
+});
+const StarIcon = ({ size = 14, filled = true }) => <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{flexShrink:0}}><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z" fill={filled ? '#E0A030' : 'none'} stroke={filled ? '#E0A030' : 'currentColor'} strokeWidth="1.6" strokeLinejoin="round"/></svg>;
+const Rating = ({ value }) => value > 0 ? <span style={{display:'inline-flex',alignItems:'center',gap:3,color:'var(--text)',fontWeight:600}}><StarIcon size={12} />{value}</span> : null;
+
+// Brand mark (same drawing as the app icon)
+function LogoMark({ size = 28 }) {
+  return (<svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" style={{flexShrink:0,display:'block'}}>
+    <rect width="512" height="512" rx="112" fill="#D4715E"/>
+    <g transform="translate(0 -19)">
+      <g fill="none" stroke="#FFF9F5" strokeLinecap="round" strokeWidth="20"><path d="M200 216c-22-26 22-50 0-84"/><path d="M256 216c-22-26 22-50 0-84"/><path d="M312 216c-22-26 22-50 0-84"/></g>
+      <path d="M120 250h272a8 8 0 0 1 8 8c0 72-56 132-128 138h-32c-72-6-128-66-128-138a8 8 0 0 1 8-8z" fill="#FFF9F5"/>
+      <rect x="196" y="402" width="120" height="16" rx="8" fill="#FFF9F5"/>
+    </g>
+  </svg>);
+}
+
+// ======================== RECIPE TYPES ========================
+const MAINS = ['Chicken','Beef','Pork','Lamb','Fish & seafood','Vegetarian','Vegan','Other'];
+const MAIN_COLORS = { Chicken:'#C9962E', Beef:'#B5533C', Pork:'#CF7A6B', Lamb:'#8E6448', 'Fish & seafood':'#4F86B5', Vegetarian:'#5E9463', Vegan:'#3F7F4E', Other:'#968A7F' };
+const TAGS = ['Quick','Pasta','Rice','Noodles','Soup','Salad','Curry','Spicy','Comfort food','Healthy','Batch cook','Lunch','Breakfast','Dessert'];
+const MAIN_KEYWORDS = [
+  ['Fish & seafood', ['salmon','cod','haddock','tuna','prawn','shrimp','fish','mackerel','sea bass','crab','mussel','scallop','squid','hake','trout']],
+  ['Chicken', ['chicken','turkey']],
+  ['Lamb', ['lamb']],
+  ['Beef', ['beef','steak','mince','brisket','meatball']],
+  ['Pork', ['pork','bacon','sausage','ham','chorizo','pancetta','gammon','prosciutto','salami','pepperoni','nduja']],
+];
+function guessMain(r) {
+  const test = text => { text = (text || '').toLowerCase(); for (const [m, kws] of MAIN_KEYWORDS) if (kws.some(k => new RegExp('\\b' + k).test(text))) return m; return null; };
+  return test(r.name) || test((r.ingredients || []).map(i => i.name).join(' | '));
+}
+// Recipes saved before main ingredients existed used shop-aisle categories; work theirs out on the fly
+function recipeMain(r) {
+  if (MAINS.includes(r.category)) return r.category;
+  const g = guessMain(r); if (g) return g;
+  if (r.category === 'Fruit & Veg' || (r.ingredients || []).length >= 3) return 'Vegetarian';
+  return 'Other';
+}
+function recipeMins(r) {
+  const one = s => { s = String(s || '').trim(); if (!s) return 0; if (/^\d+$/.test(s)) return +s; return findDurations(s).reduce((a, d) => a + d.secs, 0) / 60; };
+  return Math.round(one(r.prepTime) + one(r.cookTime));
+}
+const fmtMins = m => m >= 60 ? `${Math.floor(m/60)} hr${m % 60 ? ' ' + (m % 60) + ' min' : ''}` : `${m} min`;
+function RecipeThumb({ recipe, size = 44, radius = 10 }) {
+  const [bad, setBad] = useState(false);
+  const col = MAIN_COLORS[recipeMain(recipe)] || MAIN_COLORS.Other;
+  if (recipe.image && !bad) return <img src={recipe.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBad(true)}
+    style={{ width:size, height:size, objectFit:'cover', borderRadius:radius, flexShrink:0, background:'var(--border)', display:'block' }} />;
+  const initials = (recipe.name || '?').trim().split(/\s+/).filter(w => /^[\p{L}\d]/u.test(w)).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  return <div aria-hidden="true" style={{ width:size, height:size, borderRadius:radius, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+    background: col + '24', color: col, fontWeight:600, fontSize: Math.round(size * .36), fontFamily:'Lora,Georgia,serif', letterSpacing:'.02em' }}>{initials}</div>;
+}
+function recipeMeta(r) {
+  const mins = recipeMins(r);
+  return [recipeMain(r) !== 'Other' ? recipeMain(r) : null, mins ? fmtMins(mins) : null].filter(Boolean).join(' · ');
+}
+
+// ======================== APP SHELL ========================
+const AppCtx = createContext({});
+function PageHead({ title, sub, children }) {
+  const { isDesktop, sync, openSettings } = useContext(AppCtx);
+  const dot = sync === 'syncing' ? 'var(--warning)' : sync === 'offline' ? 'var(--text-muted)' : null;
+  return (
+    <div style={S.pageHead}>
+      <div style={{flex:1,minWidth:0}}>
+        <h1 style={{fontSize:'1.6rem',letterSpacing:'-.02em',lineHeight:1.15}}>{title}</h1>
+        {sub && <div style={{fontSize:'.82rem',color:'var(--text-muted)',marginTop:2}}>{sub}</div>}
+      </div>
+      <div style={{display:'flex',gap:6,alignItems:'center',flexShrink:0}}>
+        {children}
+        {!isDesktop && <button aria-label={'Settings' + (dot ? ` (${sync})` : '')} onClick={openSettings} style={{...S.iconBtn,position:'relative'}}>
+          {Icon.settings}
+          {dot && <span style={{position:'absolute',top:5,right:5,width:8,height:8,borderRadius:'50%',background:dot,border:'2px solid var(--bg)'}} />}
+        </button>}
+      </div>
+    </div>
+  );
+}
+function Segmented({ value, options, onChange }) {
+  return (<div role="radiogroup" style={{display:'inline-flex',background:'var(--border)',borderRadius:10,padding:3,gap:2}}>
+    {options.map(([v, label]) => (
+      <button key={v} role="radio" aria-checked={value === v} onClick={() => onChange(v)}
+        style={{border:'none',cursor:'pointer',borderRadius:8,padding:'6px 12px',fontFamily:'inherit',fontSize:'.82rem',fontWeight:600,
+          background: value === v ? 'var(--surface)' : 'transparent', color: value === v ? 'var(--text)' : 'var(--text-muted)',
+          boxShadow: value === v ? '0 1px 2px rgba(0,0,0,.08)' : 'none'}}>{label}</button>
+    ))}
+  </div>);
+}
+function applyTheme(t) {
+  try { if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; } catch(e) {}
+}
+applyTheme((() => { try { return localStorage.getItem('kitchen_theme'); } catch(e) { return null; } })());
+function SettingsSheet({ open, onClose, session, sync, syncNow }) {
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem('kitchen_theme') || 'auto'; } catch(e) { return 'auto'; } });
+  function pickTheme(t) { setTheme(t); try { t === 'auto' ? localStorage.removeItem('kitchen_theme') : localStorage.setItem('kitchen_theme', t); } catch(e) {} applyTheme(t); }
+  const syncText = { synced:'Up to date', syncing:'Syncing…', offline:"Offline: changes are saved on this phone and will sync when you're back online" }[sync];
+  const row = { display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, padding:'14px 0', borderBottom:'1px solid var(--border)' };
+  return (
+    <Overlay open={open} onClose={onClose} title="Settings">
+      <div style={row}>
+        <div style={{minWidth:0}}><div style={S.itemName}>Signed in</div><div style={{...S.itemMeta,overflow:'hidden',textOverflow:'ellipsis'}}>{session?.user?.email}</div></div>
+      </div>
+      <div style={row}>
+        <div style={{minWidth:0}}><div style={S.itemName}>Sync</div><div style={S.itemMeta}>{syncText}</div></div>
+        <Btn secondary sm onClick={syncNow} disabled={sync === 'syncing'}>{Icon.refresh} Sync now</Btn>
+      </div>
+      <div style={row}>
+        <div style={S.itemName}>Appearance</div>
+        <Segmented value={theme} onChange={pickTheme} options={[['auto','Auto'],['light','Light'],['dark','Dark']]} />
+      </div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:18}}>
+        <Btn danger sm onClick={() => sb.auth.signOut()}>{Icon.logout} Log out</Btn>
+        <span style={{fontSize:'.75rem',color:'var(--text-muted)'}}>Our Kitchen v{APP_VERSION}</span>
+      </div>
+    </Overlay>
+  );
+}
+
+
 
 // ======================== SYNC ENGINE ========================
 // Both of you edit the same data from different phones. Each device keeps:
@@ -479,7 +638,7 @@ function useKitchenData(userId) {
     };
   }, [userId]);
 
-  return { data, update, sync };
+  return { data, update, sync, syncNow };
 }
 
 // ======================== SHARED COMPONENTS ========================
@@ -490,7 +649,7 @@ function Overlay({open, onClose, title, wide, children}) {
       <div className="overlay-panel" style={{...S.overlayPanel, ...(wide&&{maxWidth:640})}}>
         <div style={S.overlayHead}>
           <h2 style={{fontSize:'1.15rem'}}>{title}</h2>
-          <button style={S.overlayClose} onClick={onClose}>&times;</button>
+          <button style={S.overlayClose} onClick={onClose} aria-label="Close">{Icon.x}</button>
         </div>
         {children}
       </div>
@@ -501,10 +660,10 @@ function Overlay({open, onClose, title, wide, children}) {
 function EmptyState({icon, title, msg, action, onAction}) {
   return (
     <div style={S.empty}>
-      <div style={S.emptyIcon}>{icon}</div>
+      <div style={{width:64,height:64,borderRadius:20,background:'var(--accent-bg)',color:'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 14px'}}>{icon}</div>
       <div style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'1.1rem',color:'var(--text)',marginBottom:6}}>{title}</div>
       <div style={{fontSize:'.85rem',lineHeight:1.5,marginBottom:16}}>{msg}</div>
-      {action && <button style={{...S.btn,...S.btnPrimary}} onClick={onAction}>{action}</button>}
+      {action && <button style={{...S.btn,...S.btnPrimary}} onClick={onAction}>{Icon.plus} {action}</button>}
     </div>
   );
 }
@@ -550,6 +709,7 @@ function AuthScreen({onLogin}) {
   return (
     <div style={S.authContainer}>
       <div style={{textAlign:'center',marginBottom:32}}>
+        <div style={{display:'flex',justifyContent:'center',marginBottom:14}}><LogoMark size={64} /></div>
         <h1 style={{fontSize:'1.8rem',letterSpacing:'-.02em',marginBottom:4}}>Our Kitchen</h1>
         <p style={{color:'var(--text-muted)',fontSize:'.9rem'}}>Meal planning for two</p>
       </div>
@@ -557,11 +717,11 @@ function AuthScreen({onLogin}) {
         <div style={S.field}><input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} required /></div>
         <div style={S.field}><input type="password" placeholder="Password" value={pass} onChange={e=>setPass(e.target.value)} required minLength={6} /></div>
         {error && <div style={{background:'var(--danger-bg)',color:'var(--danger)',borderRadius:10,padding:'10px 14px',fontSize:'.85rem',marginBottom:14}}>{error}</div>}
-        <Btn primary style={{width:'100%',marginBottom:12}} disabled={loading}>{loading ? 'Please wait…' : mode==='login' ? 'Log In' : 'Sign Up'}</Btn>
+        <Btn primary style={{width:'100%',marginBottom:12}} disabled={loading}>{loading ? 'Please wait…' : mode==='login' ? 'Log in' : 'Sign up'}</Btn>
         <p style={{textAlign:'center',fontSize:'.85rem',color:'var(--text-muted)'}}>
           {mode==='login' ? "Don't have an account? " : 'Already have an account? '}
           <span style={{color:'var(--accent)',cursor:'pointer',fontWeight:600}} onClick={()=>{setMode(mode==='login'?'signup':'login');setError('')}}>
-            {mode==='login' ? 'Sign Up' : 'Log In'}
+            {mode==='login' ? 'Sign up' : 'Log in'}
           </span>
         </p>
       </form>
@@ -598,7 +758,7 @@ function suggestFor({ recipes, history, weekKey, day, meal, cells, exclude = [],
   const nearCats = [];
   [DAYS[di-1], day, DAYS[di+1]].forEach(d => d && MEALS.forEach(m => {
     if (`${d}-${m}` === thisKey) return;
-    const r = byId[cellRecipeId(cells[`${d}-${m}`])]; if (r && r.category && r.category !== 'Other') nearCats.push(r.category);
+    const r = byId[cellRecipeId(cells[`${d}-${m}`])]; if (r && recipeMain(r) !== 'Other') nearCats.push(recipeMain(r));
   }));
   return recipes.filter(r => !exclude.includes(r.id) && !inWeek.has(r.id)).map(r => {
     const occ = (history[r.id] || []).filter(o => !(o.wk === weekKey && o.day === day && o.meal === meal));
@@ -614,11 +774,11 @@ function suggestFor({ recipes, history, weekKey, day, meal, cells, exclude = [],
       if (gap >= 14) why.push(`Not had for ${gap >= 60 ? Math.round(gap/30.4) + ' months' : Math.round(gap/7) + ' weeks'}`);
       else if (gap < 7) why.push('Had recently');
     }
-    if (rating) { score += (rating - 3) * 12; if (rating >= 4) why.unshift('★'.repeat(rating)); }
+    if (rating) { score += (rating - 3) * 12; if (rating >= 4) why.unshift(rating === 5 ? 'A favourite' : 'Rated 4 stars'); }
     if (atMeal) score += 8; else if (atOther >= 2) score -= 10;
     if (occ.length >= 4) why.push('A regular');
     score += Math.min(occ.length, 8);
-    score -= nearCats.filter(c => c === r.category).length * 6;
+    score -= nearCats.filter(c => c === recipeMain(r)).length * 6;
     score += Math.random() * jitter;
     return { recipe: r, score, why: why.slice(0, 2).join(' · ') };
   }).sort((a, b) => b.score - a.score);
@@ -936,9 +1096,9 @@ function PlanTab({data, update, isDesktop, cook}) {
     const showList = Object.values(cells).some(v => cellRecipeId(v) && recipeMap[v]);
     if (!showFill && !showUndo && !showList && !flash) return null;
     return (<div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:16}}>
-      {showFill && <Btn secondary sm onClick={fillDinners}>✨ Fill {emptyDinners.length} empty dinner{emptyDinners.length>1?'s':''}</Btn>}
-      {showList && <Btn secondary sm onClick={()=>setShowShop(true)}>🛒 Shopping list for this week</Btn>}
-      {flash && <div style={{...S.badge,background:'var(--success-bg)',color:'var(--success)',padding:'6px 10px'}}>✓ {flash}</div>}
+      {showFill && <Btn secondary sm onClick={fillDinners}>{Icon.sparkles} Fill {emptyDinners.length} empty dinner{emptyDinners.length>1?'s':''}</Btn>}
+      {showList && <Btn secondary sm onClick={()=>setShowShop(true)}>{Icon.cart} Shop for this week</Btn>}
+      {flash && <div role="status" style={{...S.badge,background:'var(--success-bg)',color:'var(--success)',padding:'6px 10px'}}>{Icon.check2} {flash}</div>}
       {showUndo && <div style={{...S.badge,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text)',padding:'4px 4px 4px 10px',gap:8,fontWeight:500}}>
         Filled {Object.keys(undo.filled).length} — tap any to change
         <button style={{...chipBtn,fontSize:'.78rem'}} onClick={undoFill}>Undo</button></div>}
@@ -955,7 +1115,7 @@ function PlanTab({data, update, isDesktop, cook}) {
     return (
       <div style={{marginTop:20}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
-          <div style={S.sectionTitle}>🥡 Meal Prep</div>
+          <div style={{...S.sectionTitle,margin:0}}>Meal prep</div>
           {mealPrepHistory.length > 0 && (
             <button style={S.btnGhost} onClick={()=>setShowHistory(!showHistory)}>
               {showHistory ? 'Hide history' : 'History'}
@@ -965,7 +1125,7 @@ function PlanTab({data, update, isDesktop, cook}) {
 
         {mealPrep && mpRecipe ? (
           <div style={{...S.card,display:'flex',alignItems:'center',gap:12}}>
-            <span style={{fontSize:'1.2rem'}}>{CAT_EMOJI[mpRecipe.category]||'📦'}</span>
+            <RecipeThumb recipe={mpRecipe} size={44} />
             <div style={{flex:1,minWidth:0}}>
               <div style={S.itemName}>{mpRecipe.name}</div>
               <div style={S.itemMeta}>{mealPrep.days.join(', ')}</div>
@@ -977,8 +1137,8 @@ function PlanTab({data, update, isDesktop, cook}) {
           </div>
         ) : (
           <div style={{...S.card,textAlign:'center',padding:'16px'}}>
-            <div style={{color:'var(--text-muted)',fontSize:'.85rem',marginBottom:10}}>No meal prep set for this week</div>
-            <Btn primary sm onClick={openMealPrep}>Set Meal Prep</Btn>
+            <div style={{color:'var(--text-muted)',fontSize:'.85rem',marginBottom:10}}>No meal prep this week</div>
+            <Btn secondary sm onClick={openMealPrep}>{Icon.box} Set meal prep</Btn>
           </div>
         )}
 
@@ -987,7 +1147,7 @@ function PlanTab({data, update, isDesktop, cook}) {
             <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6}}>Last 12 weeks</div>
             {mealPrepHistory.map((h,i) => (
               <div key={i} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>reuseMealPrep(h)}>
-                <CatDot cat={h.category} />
+                <RecipeThumb recipe={recipeMap[h.recipeId]||{name:h.recipeName}} size={36} radius={8} />
                 <div style={{flex:1,minWidth:0}}>
                   <div style={S.itemName}>{h.recipeName}</div>
                   <div style={S.itemMeta}>{relDate(h.weekKey)} · {h.days.join(', ')}</div>
@@ -1010,13 +1170,13 @@ function PlanTab({data, update, isDesktop, cook}) {
       : (typeof dinnerId === 'string' && recipeMap[dinnerId]) ? ['Tonight', recipeMap[dinnerId]] : null;
     if (!pick) return null;
     const [label, r] = pick;
-    return (<div style={{...S.card,display:'flex',alignItems:'center',gap:12,marginBottom:16,background:'var(--accent-bg)',borderColor:'transparent'}}>
-      <span style={{fontSize:'1.6rem'}}>👩‍🍳</span>
+    return (<div style={{...S.card,display:'flex',alignItems:'center',gap:12,marginBottom:16,background:'var(--accent-bg)',borderColor:'transparent',padding:'12px 14px'}}>
+      <RecipeThumb recipe={r} size={48} />
       <div style={{flex:1,minWidth:0}}>
         <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--accent)'}}>{label}</div>
         <div style={{...S.itemName,fontSize:'1rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name}</div>
       </div>
-      <Btn primary sm onClick={()=>cook(r.id)}>Start cooking</Btn>
+      <Btn primary sm onClick={()=>cook(r.id)}>{Icon.chef} Cook</Btn>
     </div>);
   }
 
@@ -1030,13 +1190,13 @@ function PlanTab({data, update, isDesktop, cook}) {
     const leftover = isLunch && !search ? prevDinner(picker.day) : null;
     return (<div>
       {currentRecipe && <div style={{...S.card,display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
-        <CatDot cat={currentRecipe.category} />
+        <RecipeThumb recipe={currentRecipe} size={40} radius={8} />
         <div style={{flex:1,minWidth:0,...S.itemName}}>{currentRecipe.name}</div>
-        <Btn primary sm onClick={()=>{setPicker(null);setSearch('');cook(currentRecipe.id)}}>👩‍🍳 Cook</Btn>
+        <Btn primary sm onClick={()=>{setPicker(null);setSearch('');cook(currentRecipe.id)}}>{Icon.chef} Cook</Btn>
       </div>}
       <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}}>
         {current && <Btn danger sm onClick={()=>assign(null)}>Clear</Btn>}
-        <Btn secondary sm onClick={()=>assign('__OUT__')}>🍽️ Eating out</Btn>
+        <Btn secondary sm onClick={()=>assign('__OUT__')}>{Icon.utensils} Eating out</Btn>
       </div>
 
       <div style={{position:'relative',marginBottom:14}}>
@@ -1057,7 +1217,7 @@ function PlanTab({data, update, isDesktop, cook}) {
       {!search && <>
         {leftover && (
           <div style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(leftover.value)}>
-            <span style={{fontSize:'1.1rem'}}>🍱</span>
+            <span style={{width:36,height:36,borderRadius:8,background:'var(--accent-bg)',color:'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{Icon.repeat}</span>
             <div style={{flex:1,minWidth:0}}>
               <div style={S.itemName}>Leftovers: {leftover.label}</div>
               <div style={S.itemMeta}>From the night before</div>
@@ -1066,8 +1226,8 @@ function PlanTab({data, update, isDesktop, cook}) {
         )}
         {sugg.length > 1 && (<div style={{marginBottom:6}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',margin:'14px 0 2px'}}>
-            <div style={{...S.sectionTitle,margin:0}}>✨ Suggestions</div>
-            <button style={{...chipBtn,fontSize:'.8rem',padding:'6px 12px'}} onClick={()=>surpriseMe(sugg)}>🎲 Surprise me</button>
+            <div style={{...S.sectionTitle,margin:0}}>Suggestions</div>
+            <Btn ghost sm style={{color:'var(--accent)',fontWeight:600}} onClick={()=>surpriseMe(sugg)}>{Icon.shuffle} Surprise me</Btn>
           </div>
           {surprise && recipeMap[surprise.id] && (
             <div style={{...S.card,marginTop:10,background:'var(--accent-bg)',borderColor:'transparent',textAlign:'center',padding:'16px'}}>
@@ -1082,7 +1242,7 @@ function PlanTab({data, update, isDesktop, cook}) {
           )}
           {sugg.slice(0,3).map(sg => (
             <div key={sg.recipe.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(sg.recipe.id)}>
-              <CatDot cat={sg.recipe.category} />
+              <RecipeThumb recipe={sg.recipe} size={36} radius={8} />
               <div style={{flex:1,minWidth:0}}>
                 <div style={S.itemName}>{sg.recipe.name}</div>
                 {sg.why && <div style={S.itemMeta}>{sg.why}</div>}
@@ -1093,10 +1253,10 @@ function PlanTab({data, update, isDesktop, cook}) {
 
         {isLunch && recentMealPrepRecipes.length > 0 && (
           <div>
-            <div style={S.sectionTitle}>🥡 Recent meal preps</div>
+            <div style={S.sectionTitle}>Recent meal preps</div>
             {recentMealPrepRecipes.map(h => (
               <div key={h.recipeId} style={{...S.itemRow,cursor:'pointer',padding:'8px 0'}} onClick={()=>assign(h.recipeId)}>
-                <CatDot cat={h.category} />
+                <RecipeThumb recipe={recipeMap[h.recipeId]||{name:h.recipeName}} size={36} radius={8} />
                 <div style={{flex:1,minWidth:0}}><div style={S.itemName}>{h.recipeName}</div></div>
               </div>
             ))}
@@ -1108,10 +1268,10 @@ function PlanTab({data, update, isDesktop, cook}) {
       {filtered.length===0 ? (!search.trim() && <p style={{color:'var(--text-muted)',textAlign:'center',padding:20}}>No recipes yet. Type a meal above, or add recipes in the Recipes tab.</p>)
       : [...filtered].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(r => (
         <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>assign(r.id)}>
-          <CatDot cat={r.category} />
+          <RecipeThumb recipe={r} size={36} radius={8} />
           <div style={{flex:1,minWidth:0}}>
             <div style={S.itemName}>{r.name}</div>
-            {(r.rating>0 || r.lastPlanned) && <div style={S.itemMeta}>{r.rating>0 && <span style={{color:'#E0A030'}}>{'★'.repeat(r.rating)}</span>}{r.rating>0 && r.lastPlanned && ' · '}{r.lastPlanned && <>Last planned {relDate(r.lastPlanned)}</>}</div>}
+            {(r.rating>0 || r.lastPlanned) && <div style={{...S.itemMeta,display:'flex',alignItems:'center',gap:6}}><Rating value={r.rating} />{r.rating>0 && r.lastPlanned && '·'}{r.lastPlanned && <span>Last planned {relDate(r.lastPlanned).toLowerCase()}</span>}</div>}
           </div>
         </div>
       ))}
@@ -1129,7 +1289,7 @@ function PlanTab({data, update, isDesktop, cook}) {
             <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6}}>Recent meal preps</div>
             {recentMealPrepRecipes.map(h => (
               <div key={h.recipeId} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>pickMealPrepRecipe(h.recipeId)}>
-                <CatDot cat={h.category} />
+                <RecipeThumb recipe={recipeMap[h.recipeId]||{name:h.recipeName}} size={36} radius={8} />
                 <div style={{flex:1,minWidth:0}}>
                   <div style={S.itemName}>{h.recipeName}</div>
                 </div>
@@ -1145,7 +1305,7 @@ function PlanTab({data, update, isDesktop, cook}) {
         </div>
         {mealPrepFiltered.map(r => (
           <div key={r.id} style={{...S.itemRow,cursor:'pointer'}} onClick={()=>pickMealPrepRecipe(r.id)}>
-            <CatDot cat={r.category} />
+            <RecipeThumb recipe={r} size={36} radius={8} />
             <div style={{flex:1,minWidth:0}}>
               <div style={S.itemName}>{r.name}</div>
             </div>
@@ -1157,7 +1317,7 @@ function PlanTab({data, update, isDesktop, cook}) {
       const r = recipeMap[mealPrepRecipe];
       return (<div>
         <div style={{...S.card,display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
-          <span style={{fontSize:'1.1rem'}}>{CAT_EMOJI[r?.category]||'📦'}</span>
+          {r && <RecipeThumb recipe={r} size={36} radius={8} />}
           <div style={{fontWeight:600}}>{r?.name||'Recipe'}</div>
           <button style={S.btnGhost} onClick={()=>{setMealPrepOverlay('pick');setMealPrepSearch('')}}>Change</button>
         </div>
@@ -1170,7 +1330,7 @@ function PlanTab({data, update, isDesktop, cook}) {
         ))}
         <div style={{marginTop:16}}>
           <Btn primary onClick={confirmMealPrep} disabled={selectedDayCount===0}>
-            Set Meal Prep ({selectedDayCount} day{selectedDayCount!==1?'s':''})
+            Set meal prep ({selectedDayCount} day{selectedDayCount!==1?'s':''})
           </Btn>
         </div>
       </div>);
@@ -1178,40 +1338,64 @@ function PlanTab({data, update, isDesktop, cook}) {
     return null;
   }
 
+  // ---- Week grid
+  const dayInfo = DAYS.map((day, di) => {
+    const date = new Date(weekStart); date.setDate(date.getDate() + di);
+    return { day, di, date, isToday: weekOffset === 0 && di === todayIdx, isPast: weekOffset < 0 || (weekOffset === 0 && di < todayIdx) };
+  });
+  function slot(day, meal) {
+    const val = cells[`${day}-${meal}`];
+    if (!val) return null;
+    if (val === '__OUT__') return { icon: Icon.utensils, text: 'Eating out', muted: true };
+    const lo = cellLeftover(val); if (lo) return { icon: Icon.repeat, text: recipeMap[lo]?.name || 'Leftovers', tag: 'Leftovers' };
+    const note = cellNote(val); if (note) return { text: note };
+    const r = cellRecipeId(val) && recipeMap[val]; if (r) return { text: r.name, recipe: r };
+    return null;
+  }
+  const weekTitle = weekOffset === 0 ? 'This week' : weekOffset === 1 ? 'Next week' : weekOffset === -1 ? 'Last week' : fmtWeek(weekStart);
+  function WeekNav() {
+    return (<div style={S.weekNav}>
+      <button style={S.weekBtn} aria-label="Previous week" onClick={()=>setWeekOffset(w=>w-1)}>{Icon.chevL}</button>
+      <div style={{textAlign:'center'}}>
+        <div style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'1rem'}}>{weekTitle}</div>
+        <div style={{fontSize:'.75rem',color:'var(--text-muted)'}}>
+          {Math.abs(weekOffset) <= 1 && fmtWeek(weekStart)}
+          {weekOffset !== 0 && <>{Math.abs(weekOffset) <= 1 && ' · '}<button style={{...S.btnGhost,padding:0,fontSize:'.75rem',color:'var(--accent)',fontWeight:600}} onClick={()=>setWeekOffset(0)}>Back to this week</button></>}
+        </div>
+      </div>
+      <button style={S.weekBtn} aria-label="Next week" onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
+    </div>);
+  }
+  const slotKey = (e, day, meal) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker(day, meal); } };
+
   // Desktop table view
   if (isDesktop) {
     return (
       <div>
-        <div style={S.pageHead}><h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em'}}>Meal Plan</h1></div>
-        <div style={S.weekNav}>
-          <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w-1)}>{Icon.chevL}</button>
-          <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(weekStart)?'This Week':fmtWeek(weekStart)}</span>
-          <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
-        </div>
+        <PageHead title="Meal plan" />
+        {WeekNav()}
         {TodayCard()}
         {PlanActions()}
 
         <div style={S.planTable}>
           <div style={S.planHeader}></div>
-          {DAYS.map(day => <div key={day} style={S.planHeader}>{day}</div>)}
+          {dayInfo.map(d => (
+            <div key={d.day} style={{...S.planHeader, ...(d.isToday && {color:'var(--accent)',boxShadow:'inset 0 -2px 0 var(--accent)'})}}>
+              {d.day} <span style={{fontWeight:600,fontSize:'.9rem',letterSpacing:0,marginLeft:3,color:d.isToday?'var(--accent)':d.isPast?'var(--text-muted)':'var(--text)'}}>{d.date.getDate()}</span>
+            </div>
+          ))}
           {MEALS.map(meal => (
             <React.Fragment key={meal}>
               <div style={S.planMealLabel}>{meal}</div>
-              {DAYS.map(day => {
-                const key = `${day}-${meal}`;
-                const val = cells[key];
-                const isOut = val === '__OUT__';
-                const lo = cellLeftover(val);
-                const note = cellNote(val) || (lo ? '🍱 ' + (recipeMap[lo]?.name || 'Leftovers') : null);
-                const recipe = cellRecipeId(val) ? recipeMap[val] : null;
+              {dayInfo.map(d => {
+                const sl = slot(d.day, meal);
                 return (
-                  <div key={key} style={{...S.planTableCell}} onClick={()=>openPicker(day,meal)}
-                    onMouseEnter={e=>e.currentTarget.style.background='var(--accent-bg)'}
-                    onMouseLeave={e=>e.currentTarget.style.background='var(--surface)'}>
-                    {isOut ? <span style={{fontSize:'.82rem'}}>🍽️ Out</span>
-                      : note ? <span style={{fontSize:'.82rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'100%',display:'block'}}>{note}</span>
-                      : recipe ? <span style={{fontSize:'.82rem',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'100%',display:'block'}}>{recipe.name}</span>
-                      : <span style={{color:'var(--text-muted)',fontSize:'.75rem'}}>+</span>}
+                  <div key={d.day} role="button" tabIndex={0} className="plan-cell" aria-label={`${DAY_FULL[d.di]} ${meal.toLowerCase()}: ${sl ? sl.text : 'empty'}`}
+                    style={{...S.planTableCell, ...(d.isToday && {background:'var(--accent-bg)'})}}
+                    onClick={()=>openPicker(d.day,meal)} onKeyDown={e=>slotKey(e,d.day,meal)}>
+                    {sl ? <div style={{minWidth:0,maxWidth:'100%',display:'flex',alignItems:'center',gap:5,justifyContent:'center',color:sl.muted?'var(--text-muted)':'var(--text)',opacity:d.isPast?.55:1}}>
+                          {sl.icon}<span title={sl.tag} style={{fontSize:'.82rem',fontWeight:sl.recipe?500:400,overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{sl.text}</span></div>
+                      : <span className="plan-add" style={{color:'var(--text-muted)',display:'flex'}}>{Icon.plusSm}</span>}
                   </div>
                 );
               })}
@@ -1221,65 +1405,59 @@ function PlanTab({data, update, isDesktop, cook}) {
 
         {MealPrepSection()}
 
-        <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
+        <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${DAY_FULL[DAYS.indexOf(picker.day)]} ${picker.meal.toLowerCase()}`:''}>
           {picker && RecipePickerContent()}
         </Overlay>
         <Overlay open={showShop} onClose={()=>setShowShop(false)} title="Shopping for this week">
           {showShop && <ShopFromPlan plan={plan} recipeMap={recipeMap} inventory={data.inventory} shopping={data.shopping} todayIdx={todayIdx} onAdd={addShopping} />}
         </Overlay>
-        <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
+        <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick days':'Set meal prep'}>
           {MealPrepOverlayContent()}
         </Overlay>
       </div>
     );
   }
 
-  // Mobile stacked view
+  // Mobile: one compact row per day
   return (
     <div>
-      <div style={S.pageHead}><h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em'}}>Meal Plan</h1></div>
-      <div style={S.weekNav}>
-        <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w-1)}>{Icon.chevL}</button>
-        <span style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'.95rem'}}>{isThisWeek(weekStart)?'This Week':fmtWeek(weekStart)}</span>
-        <button style={S.weekBtn} onClick={()=>setWeekOffset(w=>w+1)}>{Icon.chevR}</button>
-      </div>
+      <PageHead title="Meal plan" />
+      {WeekNav()}
       {TodayCard()}
       {PlanActions()}
 
-      {DAYS.map((day,di) => (
-        <div key={day} style={{marginBottom:12}}>
-          <div style={S.dayName}>{DAY_FULL[di]}</div>
-          <div style={{display:'flex',gap:8}}>
-            {MEALS.map(meal => {
-              const key = `${day}-${meal}`;
-              const val = cells[key];
-              const isOut = val === '__OUT__';
-              const lo = cellLeftover(val);
-              const note = cellNote(val) || (lo ? '🍱 ' + (recipeMap[lo]?.name || 'Leftovers') : null);
-              const recipe = cellRecipeId(val) ? recipeMap[val] : null;
-              return (
-                <div key={meal} style={S.mealCell} onClick={()=>openPicker(day,meal)}>
-                  <div style={{fontSize:'.68rem',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text-muted)',marginBottom:3}}>{meal}</div>
-                  {isOut ? <div style={{fontSize:'.85rem',fontWeight:500}}>🍽️ Out</div>
-                    : note ? <div style={{fontSize:'.85rem',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{note}</div>
-                    : recipe ? <div style={{fontSize:'.85rem',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{recipe.name}</div>
-                    : <div style={{color:'var(--text-muted)',fontStyle:'italic',fontSize:'.8rem'}}>+ Add</div>}
-                </div>
-              );
-            })}
+      {dayInfo.map(d => (
+        <div key={d.day} data-day={d.day} style={{display:'flex',gap:8,marginBottom:8,opacity:d.isPast?.5:1}}>
+          <div aria-hidden="true" style={{width:44,flexShrink:0,borderRadius:12,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+            background:d.isToday?'var(--accent)':'transparent',color:d.isToday?'var(--accent-text)':'var(--text)'}}>
+            <div style={{fontSize:'.64rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',opacity:d.isToday?.9:.55}}>{d.day}</div>
+            <div style={{fontSize:'1.15rem',fontWeight:600,lineHeight:1.15}}>{d.date.getDate()}</div>
           </div>
+          {MEALS.map(meal => {
+            const sl = slot(d.day, meal);
+            return (
+              <button key={meal} onClick={()=>openPicker(d.day,meal)} aria-label={`${DAY_FULL[d.di]} ${meal.toLowerCase()}: ${sl ? sl.text : 'empty'}`}
+                style={{flex:1,minWidth:0,textAlign:'left',padding:'8px 11px',borderRadius:12,cursor:'pointer',minHeight:56,color:'var(--text)',
+                  border: sl ? '1px solid var(--border)' : '1px dashed var(--border)', background: sl ? 'var(--surface)' : 'transparent'}}>
+                <div style={{fontSize:'.64rem',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text-muted)',marginBottom:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{meal}{sl?.tag && ` · ${sl.tag}`}</div>
+                {sl ? <div style={{display:'flex',alignItems:'center',gap:5,fontSize:'.86rem',fontWeight:sl.recipe?500:400,color:sl.muted?'var(--text-muted)':'var(--text)',minWidth:0}}>
+                      {sl.icon}<span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{sl.text}</span></div>
+                  : <div style={{color:'var(--text-muted)',opacity:.55,display:'flex'}}>{Icon.plusSm}</div>}
+              </button>
+            );
+          })}
         </div>
       ))}
 
       {MealPrepSection()}
 
-      <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${picker.day} ${picker.meal}`:''}>
+      <Overlay open={!!picker} onClose={()=>{setPicker(null);setSearch('')}} title={picker?`${DAY_FULL[DAYS.indexOf(picker.day)]} ${picker.meal.toLowerCase()}`:''}>
         {picker && RecipePickerContent()}
       </Overlay>
       <Overlay open={showShop} onClose={()=>setShowShop(false)} title="Shopping for this week">
           {showShop && <ShopFromPlan plan={plan} recipeMap={recipeMap} inventory={data.inventory} shopping={data.shopping} todayIdx={todayIdx} onAdd={addShopping} />}
         </Overlay>
-        <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick Days':'Set Meal Prep'}>
+        <Overlay open={!!mealPrepOverlay} onClose={()=>{setMealPrepOverlay(null);setMealPrepSearch('')}} title={mealPrepOverlay==='days'?'Pick days':'Set meal prep'}>
         {MealPrepOverlayContent()}
       </Overlay>
     </div>
@@ -1337,10 +1515,9 @@ function normalizeImported(r, url) {
   if (!prep && !cook && r.totalTime) cook = isoDuration(r.totalTime);
   const ingredients = [].concat(r.recipeIngredient || []).map(splitIngredient).filter(i => i.name);
   const method = flattenSteps(r.recipeInstructions);
-  const guess = guessCategory(name);
   return {
-    name, servings, prepTime: prep, cookTime: cook,
-    category: guess !== 'Other' ? guess : 'Other',
+    name, servings, prepTime: prep, cookTime: cook, tags: [],
+    category: guessMain({ name, ingredients }) || 'Other',
     ingredients: ingredients.length ? ingredients : [{ name:'', qty:'' }],
     method: method.length ? method : [''],
     source: url, image: firstImage(r.image),
@@ -1380,11 +1557,11 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
   useEffect(() => { if (sharedUrl) { setView(null); setImp({ url: sharedUrl }); runImport(sharedUrl); clearShared(); } }, [sharedUrl]);
 
   function openAdd() {
-    setForm({name:'',servings:'4',prepTime:'',cookTime:'',category:'Other',ingredients:[{name:'',qty:''}],method:['']});
+    setForm({name:'',servings:'4',prepTime:'',cookTime:'',category:'Other',tags:[],ingredients:[{name:'',qty:''}],method:['']});
     setView('add');
   }
   function openEdit(r) {
-    setForm({...r,ingredients:r.ingredients?.length?[...r.ingredients.map(i=>({...i}))]:[{name:'',qty:''}],method:r.method?.length?[...r.method]:['']});
+    setForm({...r,category:recipeMain(r),tags:r.tags||[],ingredients:r.ingredients?.length?[...r.ingredients.map(i=>({...i}))]:[{name:'',qty:''}],method:r.method?.length?[...r.method]:['']});
     setView('edit');
   }
 
@@ -1392,7 +1569,7 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
     if(!form?.name?.trim()) return;
     const rec = {
       name:form.name.trim(), servings:form.servings||'4', prepTime:form.prepTime||'', cookTime:form.cookTime||'',
-      category:form.category||'Other',
+      category:form.category||'Other', tags:form.tags||[],
       ...(form.source ? {source:form.source} : {}), ...(form.image ? {image:form.image} : {}),
       ingredients:form.ingredients.filter(i=>i.name.trim()).map(i=>({name:i.name.trim(),qty:i.qty.trim()})),
       method:form.method.filter(s=>s.trim()),
@@ -1425,7 +1602,16 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
     setView(null);
   }
 
-  const filtered = recipes.filter(r => r.name?.toLowerCase().includes(search.toLowerCase()));
+  const [filter, setFilter] = useState(null);
+  const filterOpts = useMemo(() => {
+    const mains = MAINS.filter(m => m !== 'Other' && recipes.some(r => recipeMain(r) === m));
+    const tags = TAGS.filter(t => recipes.some(r => (r.tags||[]).includes(t)));
+    const quick = recipes.some(r => { const m = recipeMins(r); return m > 0 && m <= 30; }) ? ['Under 30 min'] : [];
+    return [...quick, ...tags, ...mains];
+  }, [recipes]);
+  const matchesFilter = r => !filter || (filter === 'Under 30 min' ? (recipeMins(r) > 0 && recipeMins(r) <= 30) : MAINS.includes(filter) ? recipeMain(r) === filter : (r.tags||[]).includes(filter));
+  const filtered = recipes.filter(r => r.name?.toLowerCase().includes(search.toLowerCase()) && matchesFilter(r))
+    .sort((a,b) => (a.name||'').localeCompare(b.name||''));
   // view: null | 'add' | 'edit' | recipe id (looked up so the detail shows live data)
   const viewRecipe = typeof view==='string' && view!=='add' && view!=='edit' ? recipes.find(r=>r.id===view) : null;
 
@@ -1444,10 +1630,17 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
       <div style={S.field}><label style={S.label}>Name</label><input value={f.name} onChange={e=>set('name',e.target.value)} placeholder="Recipe name" /></div>
       <div style={S.fieldRow}>
         <div style={{...S.field,flex:1}}><label style={S.label}>Servings</label><input value={f.servings} onChange={e=>set('servings',e.target.value)} placeholder="4" /></div>
-        <div style={{...S.field,flex:1}}><label style={S.label}>Category</label>
+        <div style={{...S.field,flex:1}}><label style={S.label}>Main ingredient</label>
           <select value={f.category} onChange={e=>set('category',e.target.value)}>
-            {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+            {MAINS.map(c=><option key={c} value={c}>{c}</option>)}
           </select>
+        </div>
+      </div>
+      <div style={S.field}><label style={S.label}>Tags</label>
+        <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+          {TAGS.map(t => { const on = (f.tags||[]).includes(t); return (
+            <button key={t} type="button" aria-pressed={on} style={{...S.chip,...(on&&S.chipOn)}}
+              onClick={()=>set('tags', on ? f.tags.filter(x=>x!==t) : [...(f.tags||[]), t])}>{t}</button>); })}
         </div>
       </div>
       <div style={S.fieldRow}>
@@ -1459,7 +1652,7 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
         <div key={i} style={S.ingRow}>
           <input style={{flex:2}} placeholder="Ingredient" value={ing.name} onChange={e=>updateIng(i,'name',e.target.value)} />
           <input style={{flex:1}} placeholder="Qty" value={ing.qty} onChange={e=>updateIng(i,'qty',e.target.value)} />
-          {f.ingredients.length>1 && <button style={S.removeBtn} onClick={()=>rmIng(i)}>&times;</button>}
+          {f.ingredients.length>1 && <button style={S.removeBtn} aria-label="Remove ingredient" onClick={()=>rmIng(i)}>{Icon.xSm}</button>}
         </div>
       ))}
       <button style={S.btnGhost} onClick={addIng}>+ Add ingredient</button>
@@ -1467,12 +1660,12 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
       {f.method.map((step,i) => (
         <div key={i} style={S.ingRow}>
           <input style={{flex:1}} placeholder={`Step ${i+1}`} value={step} onChange={e=>updateStep(i,e.target.value)} />
-          {f.method.length>1 && <button style={S.removeBtn} onClick={()=>rmStep(i)}>&times;</button>}
+          {f.method.length>1 && <button style={S.removeBtn} aria-label="Remove step" onClick={()=>rmStep(i)}>{Icon.xSm}</button>}
         </div>
       ))}
       <button style={S.btnGhost} onClick={addStep}>+ Add step</button>
       <div style={{display:'flex',gap:8,marginTop:20}}>
-        <Btn primary onClick={saveRecipe} disabled={!f.name.trim()}>Save Recipe</Btn>
+        <Btn primary onClick={saveRecipe} disabled={!f.name.trim()}>Save recipe</Btn>
       </div>
     </div>);
   }
@@ -1481,22 +1674,22 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
     return (<div>
       {recipe.image && <img src={recipe.image} alt="" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display='none'}}
         style={{width:'100%',maxHeight:220,objectFit:'cover',borderRadius:12,marginBottom:14,display:'block',background:'var(--border)'}} />}
-      <Btn primary style={{width:'100%',padding:'14px',fontSize:'1rem',marginBottom:16}} onClick={()=>{setView(null);cook(recipe.id)}}>👩‍🍳 Start cooking</Btn>
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
-        <CatDot cat={recipe.category} />
-        <span style={{...S.badge,background:'var(--border)',color:'var(--text-muted)'}}>{recipe.category}</span>
-        <span style={{marginLeft:'auto'}}><Stars value={recipe.rating||0} onChange={v=>setRecipeField(recipe.id,'rating',v)} /></span>
+      <Btn primary style={{width:'100%',padding:'14px',fontSize:'1rem',marginBottom:16}} onClick={()=>{setView(null);cook(recipe.id)}}>{Icon.chef} Start cooking</Btn>
+      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+        <span style={{...S.tag,background:(MAIN_COLORS[recipeMain(recipe)]||MAIN_COLORS.Other)+'24',color:MAIN_COLORS[recipeMain(recipe)]||MAIN_COLORS.Other}}>{recipeMain(recipe)}</span>
+        {(recipe.tags||[]).map(t => <span key={t} style={S.tag}>{t}</span>)}
       </div>
-      {recipe.lastCooked && <div style={S.itemMeta}>Last cooked {relDate(recipe.lastCooked)}{recipe.cookLog?.length>1 && <> · cooked {recipe.cookLog.length} times</>}</div>}
-      <div style={{...S.field,marginTop:12,marginBottom:0}}>
-        <label style={S.label}>Notes for next time</label>
-        <textarea style={{minHeight:56}} defaultValue={recipe.notes||''} key={recipe.id+':'+(recipe.notes||'')} placeholder="e.g. Less chilli, double the sauce"
-          onBlur={e=>{ const v=e.target.value.trim(); if(v!==(recipe.notes||'')) setRecipeField(recipe.id,'notes',v); }} />
+      <div style={{display:'flex',gap:16,flexWrap:'wrap',margin:'12px 0 4px'}}>
+        {recipe.servings && <span style={{fontSize:'.82rem',color:'var(--text-muted)',display:'inline-flex',alignItems:'center',gap:5}}>{Icon.users}<strong style={{color:'var(--text)',fontWeight:600}}>{recipe.servings}</strong> servings</span>}
+        {recipe.prepTime && <span style={{fontSize:'.82rem',color:'var(--text-muted)',display:'inline-flex',alignItems:'center',gap:5}}>{Icon.clock}<strong style={{color:'var(--text)',fontWeight:600}}>{recipe.prepTime}</strong> prep</span>}
+        {recipe.cookTime && <span style={{fontSize:'.82rem',color:'var(--text-muted)',display:'inline-flex',alignItems:'center',gap:5}}>{!recipe.prepTime && Icon.clock}<strong style={{color:'var(--text)',fontWeight:600}}>{recipe.cookTime}</strong> cook</span>}
       </div>
-      <div style={{display:'flex',gap:16,flexWrap:'wrap',margin:'12px 0'}}>
-        {recipe.servings && <span style={{fontSize:'.82rem',color:'var(--text-muted)'}}><strong style={{color:'var(--text)',fontWeight:600}}>{recipe.servings}</strong> servings</span>}
-        {recipe.prepTime && <span style={{fontSize:'.82rem',color:'var(--text-muted)'}}><strong style={{color:'var(--text)',fontWeight:600}}>{recipe.prepTime}</strong> prep</span>}
-        {recipe.cookTime && <span style={{fontSize:'.82rem',color:'var(--text-muted)'}}><strong style={{color:'var(--text)',fontWeight:600}}>{recipe.cookTime}</strong> cook</span>}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
+        <div>
+          <div style={{fontSize:'.85rem',fontWeight:600}}>Your rating</div>
+          {recipe.lastCooked && <div style={S.itemMeta}>Last cooked {relDate(recipe.lastCooked).toLowerCase()}{recipe.cookLog?.length>1 && <> · {recipe.cookLog.length} times</>}</div>}
+        </div>
+        <Stars value={recipe.rating||0} onChange={v=>setRecipeField(recipe.id,'rating',v)} />
       </div>
       {recipe.ingredients?.length>0 && (<>
         <div style={S.sectionTitle}>Ingredients</div>
@@ -1516,9 +1709,14 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
           </div>
         ))}
       </>)}
+      <div style={{...S.field,marginTop:18,marginBottom:0}}>
+        <label style={S.label}>Notes for next time</label>
+        <textarea style={{minHeight:56}} defaultValue={recipe.notes||''} key={recipe.id+':'+(recipe.notes||'')} placeholder="e.g. Less chilli, double the sauce"
+          onBlur={e=>{ const v=e.target.value.trim(); if(v!==(recipe.notes||'')) setRecipeField(recipe.id,'notes',v); }} />
+      </div>
       <div style={{display:'flex',gap:8,marginTop:18,flexWrap:'wrap'}}>
-        <Btn primary sm onClick={()=>addToList(recipe)}>Add to List</Btn>
-        {recipe.source && <a href={recipe.source} target="_blank" rel="noopener noreferrer" style={{...S.btn,...S.btnSecondary,...S.btnSm,textDecoration:'none'}}>Original ↗</a>}
+        <Btn secondary sm onClick={()=>addToList(recipe)}>{Icon.cart} Add to list</Btn>
+        {recipe.source && <a href={recipe.source} target="_blank" rel="noopener noreferrer" style={{...S.btn,...S.btnSecondary,...S.btnSm,textDecoration:'none'}}>Original {Icon.external}</a>}
         <Btn secondary sm onClick={()=>openEdit(recipe)}>Edit</Btn>
         <Btn danger sm onClick={()=>deleteRecipe(recipe.id)}>Delete</Btn>
       </div>
@@ -1526,36 +1724,42 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
   }
 
   return (<div>
-    <div style={S.pageHead}>
-      <h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em',flex:1}}>Recipes</h1>
-      <div style={{display:'flex',gap:6}}>
-        <Btn secondary sm onClick={()=>setImp({url:''})}>🔗 Import</Btn>
-        <Btn primary sm onClick={openAdd}>+ Add</Btn>
-      </div>
-    </div>
+    <PageHead title="Recipes" sub={recipes.length ? `${recipes.length} recipe${recipes.length!==1?'s':''}` : null}>
+      <Btn secondary sm onClick={()=>setImp({url:''})}>{Icon.link} Import</Btn>
+      <Btn primary sm onClick={openAdd} aria-label="Add recipe">{Icon.plus} Add</Btn>
+    </PageHead>
     {recipes.length>0 && (
-      <div style={{position:'relative',marginBottom:14}}>
-        <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none'}}>{Icon.search}</span>
-        <input style={{paddingLeft:36}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
+      <div style={{position:'relative',marginBottom:10}}>
+        <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)',pointerEvents:'none',display:'flex'}}>{Icon.search}</span>
+        <input type="search" style={{paddingLeft:36}} placeholder="Search recipes" value={search} onChange={e=>setSearch(e.target.value)} />
       </div>
     )}
-    {filtered.length===0 && !search ? (
-      <EmptyState icon="📖" title="No recipes yet" msg="Start building your collection." action="+ Add Recipe" onAction={openAdd} />
+    {filterOpts.length>1 && (
+      <div className="hscroll" style={{display:'flex',gap:6,overflowX:'auto',margin:'0 -16px 14px',padding:'0 16px'}}>
+        <button aria-pressed={!filter} style={{...S.chip,...(!filter&&S.chipOn)}} onClick={()=>setFilter(null)}>All</button>
+        {filterOpts.map(o => <button key={o} aria-pressed={filter===o} style={{...S.chip,...(filter===o&&S.chipOn)}} onClick={()=>setFilter(filter===o?null:o)}>{o}</button>)}
+      </div>
+    )}
+    {recipes.length===0 ? (
+      <EmptyState icon={Icon.book} title="No recipes yet" msg="Add your favourites, or import one from a recipe website." action="Add recipe" onAction={openAdd} />
     ) : filtered.length===0 ? (
-      <p style={{textAlign:'center',color:'var(--text-muted)',padding:20}}>No recipes match "{search}"</p>
+      <p style={{textAlign:'center',color:'var(--text-muted)',padding:20}}>No recipes match{search ? ` “${search}”` : ''}{filter ? ` in ${filter}` : ''}.</p>
     ) : (
       <div style={isDesktop ? S.cardGrid : {}}>
-        {filtered.map(r => (
-          <div key={r.id} style={{...S.card,cursor:'pointer'}} onClick={()=>setView(r.id)}>
-            <div style={{display:'flex',alignItems:'center',gap:12}}>
-              <span style={{fontSize:'1.2rem'}}>{CAT_EMOJI[r.category]||'📦'}</span>
+        {filtered.map(r => {
+          const meta = recipeMeta(r);
+          return (
+            <div key={r.id} role="button" tabIndex={0} style={{...S.card,cursor:'pointer',padding:10,display:'flex',alignItems:'center',gap:12,...(isDesktop&&{marginBottom:0})}}
+              onClick={()=>setView(r.id)} onKeyDown={e=>{ if(e.key==='Enter'){ setView(r.id); } }}>
+              <RecipeThumb recipe={r} size={60} radius={10} />
               <div style={{flex:1,minWidth:0}}>
-                <div style={S.itemName}>{r.name}</div>
-                <div style={S.itemMeta}>{r.rating>0 && <span style={{color:'#E0A030'}}>{'★'.repeat(r.rating)} · </span>}{r.ingredients?.length||0} ingredients{r.lastPlanned && <> · Last planned {relDate(r.lastPlanned)}</>}</div>
+                <div style={{...S.itemName,fontSize:'.95rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name}</div>
+                {(r.rating>0 || meta) && <div style={{...S.itemMeta,display:'flex',alignItems:'center',gap:6}}><Rating value={r.rating} />{r.rating>0 && meta && <span>·</span>}{meta && <span>{meta}</span>}</div>}
+                {r.lastPlanned && <div style={S.itemMeta}>Last planned {relDate(r.lastPlanned).toLowerCase()}</div>}
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     )}
     <Overlay open={!!imp} onClose={()=>setImp(null)} title="Import from a link">
@@ -1569,7 +1773,7 @@ function RecipesTab({data, update, isDesktop, cook, sharedUrl, clearShared}) {
         <Btn primary type="submit" style={{width:'100%'}} disabled={imp.busy || !imp.url.trim()}>{imp.busy ? 'Fetching recipe…' : 'Import'}</Btn>
       </form>}
     </Overlay>
-    <Overlay open={view==='add'||view==='edit'} onClose={()=>{setView(null);setForm(null)}} title={view==='edit'?'Edit Recipe':'Add Recipe'}>
+    <Overlay open={view==='add'||view==='edit'} onClose={()=>{setView(null);setForm(null)}} title={view==='edit'?'Edit recipe':'Add recipe'}>
       {form && RecipeForm()}
     </Overlay>
     <Overlay open={!!viewRecipe} onClose={()=>setView(null)} title={viewRecipe?.name||''}>
@@ -1663,15 +1867,10 @@ function PantryTab({data, update, isDesktop}) {
   const selectedCount = parsedItems.filter(i=>i.selected).length;
 
   return (<div>
-    <div style={S.pageHead}>
-      <h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em',flex:1}}>Pantry</h1>
-      <div style={{display:'flex',gap:6}}>
-        <Btn secondary sm onClick={()=>setShowImport(true)} style={{gap:4}}>
-          {Icon.receipt} Import
-        </Btn>
-        <Btn primary sm onClick={()=>setShowAdd(true)}>+ Add</Btn>
-      </div>
-    </div>
+      <PageHead title="Pantry">
+        <Btn secondary sm onClick={()=>setShowImport(true)}>{Icon.receipt} Receipt</Btn>
+        <Btn primary sm onClick={()=>setShowAdd(true)} aria-label="Add item">{Icon.plus} Add</Btn>
+      </PageHead>
 
     {overdueCount>0 && (
       <div style={{background:'var(--warning-bg)',borderRadius:10,padding:'10px 14px',marginBottom:14,fontSize:'.85rem',color:'var(--warning)',fontWeight:500}}>
@@ -1680,7 +1879,7 @@ function PantryTab({data, update, isDesktop}) {
     )}
 
     {inventory.length===0 ? (
-      <EmptyState icon="📦" title="Pantry is empty" msg="Add items when you buy them to track restock patterns, or import a receipt." action="+ Add Item" onAction={()=>setShowAdd(true)} />
+      <EmptyState icon={Icon.boxLg} title="Your pantry is empty" msg="Add things when you buy them and the app learns how often you restock. Or import a supermarket receipt." action="Add item" onAction={()=>setShowAdd(true)} />
     ) : (
       <div style={isDesktop ? S.cardGrid : {}}>
         {sorted.map(item => {
@@ -1689,21 +1888,21 @@ function PantryTab({data, update, isDesktop}) {
           return (
             <div key={item.id} style={isDesktop ? {...S.card,marginBottom:0} : S.itemRow}>
               <div style={{display:'flex',alignItems:'center',gap:12,width:'100%'}}>
-                <span style={{fontSize:'1.1rem'}}>{CAT_EMOJI[item.category]||'📦'}</span>
+                <CatDot cat={item.category} />
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:'flex',alignItems:'center',gap:8}}>
                     <span style={S.itemName}>{item.name}</span>
                     {r?.isOverdue && <span style={{...S.badge,background:'var(--warning-bg)',color:'var(--warning)'}}>Overdue {r.overdue}d</span>}
                   </div>
                   <div style={S.itemMeta}>
-                    {lastDate && <>Last bought {relDate(lastDate)}</>}
+                    {lastDate && <>Last bought {relDate(lastDate).toLowerCase()}</>}
                     {r && <> · Every ~{r.avgDays} days</>}
                     {!r && item.purchases?.length===1 && <> · Buy again to track frequency</>}
                   </div>
                 </div>
                 <div style={{display:'flex',gap:4,flexShrink:0}}>
                   <Btn secondary sm onClick={()=>markBought(item)}>Bought</Btn>
-                  <button style={{...S.removeBtn,width:28,height:28}} onClick={()=>removeItem(item.id)}>&times;</button>
+                  <button style={{...S.iconBtn,width:30,height:30,borderRadius:8}} aria-label={`Remove ${item.name}`} onClick={()=>removeItem(item.id)}>{Icon.xSm}</button>
                 </div>
               </div>
             </div>
@@ -1713,7 +1912,7 @@ function PantryTab({data, update, isDesktop}) {
     )}
 
     {/* Add single item overlay */}
-    <Overlay open={showAdd} onClose={()=>setShowAdd(false)} title="Add to Pantry">
+    <Overlay open={showAdd} onClose={()=>setShowAdd(false)} title="Add to pantry">
       <div style={S.field}><label style={S.label}>Item name</label><input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="e.g. Whole milk" autoFocus /></div>
       <div style={S.field}><label style={S.label}>Category</label>
         <select value={newCat} onChange={e=>setNewCat(e.target.value)}>
@@ -1721,11 +1920,11 @@ function PantryTab({data, update, isDesktop}) {
         </select>
       </div>
       <p style={{fontSize:'.82rem',color:'var(--text-muted)',marginBottom:14}}>Adds the item with today as the purchase date.</p>
-      <Btn primary onClick={addItem} disabled={!newName.trim()}>Add Item</Btn>
+      <Btn primary onClick={addItem} disabled={!newName.trim()}>Add item</Btn>
     </Overlay>
 
     {/* Receipt import overlay */}
-    <Overlay open={showImport} onClose={closeImport} title={importStep==='paste' ? 'Import Receipt' : `Review Items (${selectedCount} selected)`} wide>
+    <Overlay open={showImport} onClose={closeImport} title={importStep==='paste' ? 'Import a receipt' : `Review items (${selectedCount} selected)`} wide>
       {importStep === 'paste' ? (
         <div>
           <p style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:14,lineHeight:1.5}}>
@@ -1744,7 +1943,7 @@ function PantryTab({data, update, isDesktop}) {
               style={{minHeight:200,fontFamily:'monospace',fontSize:'.82rem'}}
             />
           </div>
-          <Btn primary onClick={handleParse} disabled={!receiptText.trim()}>Parse Receipt</Btn>
+          <Btn primary onClick={handleParse} disabled={!receiptText.trim()}>Read receipt</Btn>
         </div>
       ) : (
         <div>
@@ -1775,7 +1974,7 @@ function PantryTab({data, update, isDesktop}) {
                       onChange={e=>updateParsedCategory(idx, e.target.value)}
                       style={{width:'auto',padding:'4px 8px',fontSize:'.78rem',minWidth:100}}
                     >
-                      {CATEGORIES.map(c=><option key={c} value={c}>{CAT_EMOJI[c]} {c}</option>)}
+                      {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                 ))}
@@ -1831,25 +2030,24 @@ function ShoppingTab({data, update, isDesktop}) {
   const orderedCats = CATEGORIES.filter(c=>grouped.groups[c]);
 
   return (<div>
-    <div style={S.pageHead}>
-      <h1 style={{fontSize:'1.5rem',letterSpacing:'-.02em',flex:1}}>Shopping List</h1>
+    <PageHead title="Shopping list" sub={shopping.length ? `${shopping.filter(i=>!i.checked).length} to buy` : null}>
       {grouped.checked.length>0 && <Btn secondary sm onClick={clearChecked}>Clear done</Btn>}
-    </div>
+    </PageHead>
 
     <form onSubmit={addItem} style={{display:'flex',gap:8,marginBottom:16,maxWidth:isDesktop?500:undefined}}>
       <input style={{flex:3}} placeholder="Add item…" value={newName} onChange={e=>setNewName(e.target.value)} />
       <input style={{flex:1,minWidth:60}} placeholder="Qty" value={newQty} onChange={e=>setNewQty(e.target.value)} />
-      <Btn primary sm type="submit" disabled={!newName.trim()}>Add</Btn>
+      <Btn primary type="submit" disabled={!newName.trim()} aria-label="Add item">{Icon.plus}</Btn>
     </form>
 
     {shopping.length===0 ? (
-      <EmptyState icon="🛒" title="List is empty" msg="Add items here or tap 'Add to List' on a recipe." />
+      <EmptyState icon={Icon.cartLg} title="Nothing on the list" msg="Add things above, or use “Shop for this week” on the Plan tab to add everything your planned meals need." />
     ) : (<>
       <div style={isDesktop ? {display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16} : {}}>
         {orderedCats.map(cat => (
           <div key={cat} style={{marginBottom:isDesktop?0:16}}>
             <div style={{fontSize:'.72rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-muted)',marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
-              <span>{CAT_EMOJI[cat]||'📦'}</span> {cat}
+              <CatDot cat={cat} /> {cat}
             </div>
             {grouped.groups[cat].map(item => (
               <div key={item.id} style={S.checkRow}>
@@ -1956,7 +2154,7 @@ function useTimers() {
     if (fresh.length) {
       if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
         fresh.forEach(t => {
-          const title = `⏰ ${t.label} — done!`, opts = { body: t.recipeName || 'Timer finished', tag: 'timer-' + t.id, requireInteraction: true };
+          const title = `Timer done: ${t.label}`, opts = { body: t.recipeName || 'Timer finished', tag: 'timer-' + t.id, requireInteraction: true };
           navigator.serviceWorker?.ready.then(reg => reg.showNotification(title, opts)).catch(() => { try { new Notification(title, opts); } catch(e) {} });
         });
       }
@@ -1992,12 +2190,13 @@ function TimerChip({ t, T, big }) {
       background: done ? 'var(--accent)' : 'var(--surface)', color: done ? 'var(--accent-text)' : 'var(--text)', border:'1px solid ' + (done ? 'var(--accent)' : 'var(--border)'),
       animation: done ? 'pulse 1s ease-in-out infinite' : undefined, fontVariantNumeric:'tabular-nums' }}>
       <button onClick={() => done ? T.remove(t.id) : T.toggle(t.id)} aria-label={done ? 'Stop alarm' : t.paused ? 'Resume timer' : 'Pause timer'}
-        style={{ background:'none', border:'none', color:'inherit', cursor:'pointer', font:'inherit', fontSize: big ? '.95rem' : '.85rem', fontWeight:600, display:'flex', gap:8, alignItems:'center', padding:0 }}>
-        <span style={{ maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontWeight:500 }}>{done ? '🔔 ' : t.paused ? '⏸ ' : '⏱ '}{t.label}</span>
+        style={{ background:'none', border:'none', color:'inherit', cursor:'pointer', font:'inherit', fontSize: big ? '.95rem' : '.85rem', fontWeight:600, display:'flex', gap:6, alignItems:'center', padding:0 }}>
+        {done ? Icon.bell : t.paused ? Icon.pause : Icon.timer}
+        <span style={{ maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontWeight:500 }}>{t.label}</span>
         <span>{done ? 'Done · Stop' : fmtClock(left)}</span>
       </button>
       {!done && <button onClick={() => T.addTime(t.id, 60)} aria-label="Add a minute" style={chipBtn}>+1m</button>}
-      {!done && <button onClick={() => T.remove(t.id)} aria-label="Cancel timer" style={chipBtn}>×</button>}
+      {!done && <button onClick={() => T.remove(t.id)} aria-label="Cancel timer" style={{...chipBtn,display:'flex',alignItems:'center'}}>{Icon.xSm}</button>}
     </div>
   );
 }
@@ -2069,7 +2268,7 @@ function CookingMode({ recipe, T, step, setStep, onClose, onFinish }) {
     ds.forEach((d, k) => {
       parts.push(text.slice(pos, d.start));
       parts.push(<button key={k} onClick={() => startTimer(stepLabel(i, d), d.secs)} style={{ font:'inherit', color:'var(--accent)', background:'var(--accent-bg)', border:'none',
-        borderRadius:8, padding:'0 6px', cursor:'pointer', fontWeight:600 }}>⏱ {d.text}</button>);
+        borderRadius:8, padding:'0 6px', cursor:'pointer', fontWeight:600, display:'inline-flex', alignItems:'center', gap:4, verticalAlign:'baseline' }}>{Icon.timer}{d.text}</button>);
       pos = d.end;
     });
     parts.push(text.slice(pos));
@@ -2085,7 +2284,7 @@ function CookingMode({ recipe, T, step, setStep, onClose, onFinish }) {
         {recipe.servings && <span>{recipe.servings} servings</span>}{recipe.prepTime && <span>{recipe.prepTime} prep</span>}{recipe.cookTime && <span>{recipe.cookTime} cook</span>}
       </div>
       {recipe.notes && <div style={{ background:'var(--warning-bg)', color:'var(--text)', borderRadius:12, padding:'12px 14px', marginBottom:16, fontSize:'.95rem', lineHeight:1.5 }}>
-        <strong>📝 Notes from last time:</strong> {recipe.notes}</div>}
+        <div style={{display:'flex',alignItems:'center',gap:6,fontWeight:700,marginBottom:4,color:'var(--warning)'}}>{Icon.pencil} Notes from last time</div>{recipe.notes}</div>}
       {ings.length > 0 && <>
         <div style={{ fontSize:'.85rem', color:'var(--text-muted)', marginBottom:6 }}>Tick things off as you get them out</div>
         {ings.map((ing, i) => (
@@ -2098,7 +2297,7 @@ function CookingMode({ recipe, T, step, setStep, onClose, onFinish }) {
       {steps.length === 0 && <p style={{ color:'var(--text-muted)', marginTop:16 }}>This recipe has no method steps yet. Add some by editing the recipe.</p>}
     </div>);
     if (step === last) return (<div style={{ textAlign:'center', paddingTop:24 }}>
-      <div style={{ fontSize:'3rem' }}>🍽️</div>
+      <div style={{ width:72, height:72, borderRadius:24, background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto' }}>{Icon.chef}</div>
       <h2 style={{ fontSize:'1.6rem', margin:'8px 0 20px' }}>Enjoy!</h2>
       <div style={{ fontSize:'.85rem', color:'var(--text-muted)', marginBottom:8 }}>How was it?</div>
       <Stars value={rating} onChange={setRating} size={36} />
@@ -2113,9 +2312,9 @@ function CookingMode({ recipe, T, step, setStep, onClose, onFinish }) {
       <div style={{ fontSize:'.78rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'var(--text-muted)', marginBottom:12 }}>Step {step} of {steps.length}</div>
       {StepText({ text, i: step })}
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:24 }}>
-        {ds.map((d, k) => <Btn key={k} secondary onClick={() => startTimer(stepLabel(step, d), d.secs)}>⏱ Start {fmtDur(d.secs)} timer</Btn>)}
+        {ds.map((d, k) => <Btn key={k} secondary onClick={() => startTimer(stepLabel(step, d), d.secs)}>{Icon.timer} Start {fmtDur(d.secs)} timer</Btn>)}
         {custom === null
-          ? <Btn ghost onClick={() => setCustom('')}>+ Timer</Btn>
+          ? <Btn ghost onClick={() => setCustom('')}>{Icon.plus} Timer</Btn>
           : <form style={{ display:'flex', gap:6, alignItems:'center' }} onSubmit={e => { e.preventDefault(); const m = parseFloat(custom); if (m > 0) { startTimer(stepLabel(step), Math.round(m*60)); setCustom(null); } }}>
               <input autoFocus type="number" inputMode="decimal" min="0" step="any" value={custom} onChange={e => setCustom(e.target.value)} placeholder="Minutes" style={{ width:100 }} />
               <Btn primary sm type="submit">Start</Btn><Btn ghost type="button" onClick={() => setCustom(null)}>Cancel</Btn>
@@ -2128,7 +2327,7 @@ function CookingMode({ recipe, T, step, setStep, onClose, onFinish }) {
     <div style={{ position:'fixed', inset:0, zIndex:150, background:'var(--bg)', display:'flex', flexDirection:'column',
       paddingTop:'env(safe-area-inset-top,0px)', paddingBottom:'env(safe-area-inset-bottom,0px)' }}>
       <div style={{ maxWidth:720, width:'100%', margin:'0 auto', padding:'10px 16px 0', display:'flex', alignItems:'center', gap:10 }}>
-        <button style={S.overlayClose} onClick={onClose} aria-label="Exit cooking mode">&times;</button>
+        <button style={S.overlayClose} onClick={onClose} aria-label="Exit cooking mode">{Icon.x}</button>
         <div style={{ flex:1, minWidth:0, fontFamily:'Lora,Georgia,serif', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{recipe.name}</div>
         {ings.length > 0 && step > 0 && step < last && <Btn secondary sm onClick={() => setShowIngs(true)}>Ingredients</Btn>}
       </div>
@@ -2152,7 +2351,7 @@ function CookingMode({ recipe, T, step, setStep, onClose, onFinish }) {
       </div>
       {showIngs && <div style={{ ...S.overlayBackdrop, zIndex:160 }} onClick={e => { if (e.target === e.currentTarget) setShowIngs(false); }}>
         <div className="overlay-panel" style={S.overlayPanel}>
-          <div style={S.overlayHead}><h2 style={{ fontSize:'1.15rem' }}>Ingredients</h2><button style={S.overlayClose} onClick={() => setShowIngs(false)}>&times;</button></div>
+          <div style={S.overlayHead}><h2 style={{ fontSize:'1.15rem' }}>Ingredients</h2><button style={S.overlayClose} aria-label="Close" onClick={() => setShowIngs(false)}>{Icon.x}</button></div>
           {ings.map((ing, i) => (<div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'10px 0', borderBottom:'1px solid var(--border)', fontSize:'1rem' }}>
             <span>{ing.name}</span><span style={{ color:'var(--text-muted)' }}>{ing.qty}</span></div>))}
         </div>
@@ -2165,7 +2364,7 @@ function Stars({ value, onChange, size = 22 }) {
   return (<div style={{ display:'inline-flex', gap: size > 24 ? 6 : 2 }} role="radiogroup" aria-label="Rating">
     {[1,2,3,4,5].map(n => (
       <button key={n} role="radio" aria-checked={value === n} aria-label={`${n} star${n>1?'s':''}`} onClick={onChange ? () => onChange(value === n ? 0 : n) : undefined}
-        style={{ background:'none', border:'none', padding:2, cursor: onChange ? 'pointer' : 'default', fontSize:size, lineHeight:1, color: n <= value ? '#E0A030' : 'var(--border)' }}>★</button>
+        style={{ background:'none', border:'none', padding:2, cursor: onChange ? 'pointer' : 'default', lineHeight:0, color:'var(--border)' }}><StarIcon size={size} filled={n <= value} /></button>
     ))}
   </div>);
 }
@@ -2205,14 +2404,15 @@ function App() {
   useEffect(() => { try{const t=localStorage.getItem('kitchen_tab');if(t)setTab(t)}catch(e){} }, []);
   useEffect(() => { try{localStorage.setItem('kitchen_tab',tab)}catch(e){} }, [tab]);
 
-  if(loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',color:'var(--text-muted)'}}>Loading…</div>;
+  if(loading) return <div aria-label="Loading" style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh'}}><div style={{animation:'pulse 1.2s ease-in-out infinite'}}><LogoMark size={56} /></div></div>;
   if(!session) return <AuthScreen onLogin={setSession} />;
 
   return <MainApp session={session} tab={tab} setTab={setTab} />;
 }
 
 function MainApp({session, tab, setTab}) {
-  const {data, update, sync} = useKitchenData(session.user.id);
+  const {data, update, sync, syncNow} = useKitchenData(session.user.id);
+  const [showSettings, setShowSettings] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const T = useTimers();
   // Android "Share → Our Kitchen" from a browser opens the app with the link in the URL
@@ -2241,38 +2441,29 @@ function MainApp({session, tab, setTab}) {
   }
 
   return (
+    <AppCtx.Provider value={{ isDesktop, sync, openSettings: () => setShowSettings(true) }}>
     <div style={{display:'flex',flexDirection:isDesktop?'row':'column',height:'100vh',minHeight:0}}>
-      {/* Desktop: sidebar on the left */}
       {isDesktop && (
         <div style={{display:'flex',flexDirection:'column',borderRight:'1px solid var(--border)',background:'var(--surface)',width:'var(--sidebar-w)',minWidth:'var(--sidebar-w)'}}>
-          <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border)'}}>
-            <h1 style={{fontSize:'1.1rem',letterSpacing:'-.01em',marginBottom:4}}>Our Kitchen</h1>
-            <SyncIndicator status={sync} />
+          <div style={{padding:'18px 18px 14px',display:'flex',alignItems:'center',gap:10}}>
+            <LogoMark size={32} />
+            <div style={{minWidth:0}}>
+              <div style={{fontFamily:'Lora,Georgia,serif',fontWeight:600,fontSize:'1.05rem',lineHeight:1.2}}>Our Kitchen</div>
+              <SyncIndicator status={sync} />
+            </div>
           </div>
           <TabBar tab={tab} setTab={setTab} isDesktop={true} />
-          <div style={{marginTop:'auto',padding:'12px 20px',borderTop:'1px solid var(--border)'}}>
-            <button style={{...S.btnGhost,padding:'6px 0'}} onClick={logout}>Log out</button>
-            <div style={{fontSize:'.68rem',color:'var(--text-muted)',marginTop:4}}>v{APP_VERSION}</div>
+          <div style={{marginTop:'auto',padding:'10px 10px',borderTop:'1px solid var(--border)'}}>
+            <button style={{...S.btnGhost,display:'flex',alignItems:'center',gap:10,width:'100%',padding:'8px 10px'}} onClick={()=>setShowSettings(true)}>{Icon.settings} Settings</button>
           </div>
         </div>
       )}
 
-      {/* Main content area */}
       <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0,minHeight:0}}>
-        {/* Mobile header */}
-        {!isDesktop && (
-          <div style={S.header}>
-            <h1 style={{fontSize:'1.2rem',letterSpacing:'-.01em'}}>Our Kitchen</h1>
-            <div style={{display:'flex',alignItems:'center',gap:12}}>
-              <SyncIndicator status={sync} />
-              <button style={S.btnGhost} onClick={logout}>Log out</button>
-            </div>
-          </div>
-        )}
-
+        {!isDesktop && <div style={{height:'env(safe-area-inset-top,0px)',flexShrink:0,background:'var(--bg)'}} />}
         <div style={{
           ...S.content,
-          ...(isDesktop && S.contentDesktop),
+          ...(isDesktop ? S.contentDesktop : {paddingTop:12}),
         }}>
           <div style={{maxWidth:'var(--content-max)',margin:isDesktop?'0 auto':undefined,width:'100%'}}>
             {tab==='plan' && <PlanTab data={data} update={update} isDesktop={isDesktop} cook={startCooking} />}
@@ -2285,12 +2476,14 @@ function MainApp({session, tab, setTab}) {
         {/* Mobile tab bar */}
         {!isDesktop && <TabBar tab={tab} setTab={setTab} isDesktop={false} />}
       </div>
+      <SettingsSheet open={showSettings} onClose={()=>setShowSettings(false)} session={session} sync={sync} syncNow={syncNow} />
       {cookRecipe
         ? <CookingMode key={cookRecipe.id} recipe={cookRecipe} T={T} step={cooking.step || 0}
             setStep={fn => setCooking(c => ({ ...c, step: typeof fn === 'function' ? fn(c.step || 0) : fn }))}
             onClose={() => setCooking(c => ({ ...c, open: false }))} onFinish={finishCooking} />
         : <TimerPill T={T} recipes={data.recipes} onOpen={startCooking} isDesktop={isDesktop} />}
     </div>
+    </AppCtx.Provider>
   );
 }
 
